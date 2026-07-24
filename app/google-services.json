@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "205680878026",
+    "project_id": "eventtv-messenger",
+    "storage_bucket": "eventtv-messenger.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:205680878026:android:ff5af4d8674fefa33caf33",
+        "android_client_info": {
+          "package_name": "com.eventtv.messenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALItv6RKWI5SlnFiSRUpzlEzBxnLaZ4jg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
