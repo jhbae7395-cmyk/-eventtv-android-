@@ -9,12 +9,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Vibrator;
 import android.os.VibrationEffect;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.PermissionRequest;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
 
@@ -22,6 +25,30 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     public static final String CHANNEL_ID = "eventtv_messages";
+
+    // 파일 선택 콜백
+    private ValueCallback<Uri[]> filePathCallback;
+    private final ActivityResultLauncher<Intent> fileChooserLauncher =
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (filePathCallback == null) return;
+            Uri[] results = null;
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                Intent data = result.getData();
+                if (data.getClipData() != null) {
+                    // 다중 파일 선택
+                    int count = data.getClipData().getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) {
+                        results[i] = data.getClipData().getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    // 단일 파일 선택
+                    results = new Uri[]{data.getData()};
+                }
+            }
+            filePathCallback.onReceiveValue(results);
+            filePathCallback = null;
+        });
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -83,6 +110,49 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 request.grant(request.getResources());
+            }
+
+            // ── 파일 선택 창 처리 (Android 5.0+) ──────────────────────────────
+            @Override
+            public boolean onShowFileChooser(WebView webView,
+                                             ValueCallback<Uri[]> filePathCallback,
+                                             FileChooserParams fileChooserParams) {
+                // 이전 콜백이 남아있으면 취소 처리
+                if (MainActivity.this.filePathCallback != null) {
+                    MainActivity.this.filePathCallback.onReceiveValue(null);
+                }
+                MainActivity.this.filePathCallback = filePathCallback;
+
+                // accept 타입 확인 (이미지 전용 여부)
+                String[] acceptTypes = fileChooserParams.getAcceptTypes();
+                boolean imageOnly = acceptTypes != null && acceptTypes.length == 1
+                    && acceptTypes[0].equals("image/*");
+
+                // 파일 선택 Intent 생성
+                Intent contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                if (imageOnly) {
+                    contentIntent.setType("image/*");
+                } else {
+                    contentIntent.setType("*/*");
+                    // 다중 파일 선택 허용
+                    contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    // 이미지, 문서, 영상 등 모두 허용
+                    String[] mimeTypes = {
+                        "image/*", "application/pdf",
+                        "application/msword",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/vnd.ms-excel",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "application/vnd.ms-powerpoint",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "application/zip", "video/*", "audio/*", "text/plain"
+                    };
+                    contentIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+                }
+
+                Intent chooserIntent = Intent.createChooser(contentIntent, "파일 선택");
+                fileChooserLauncher.launch(chooserIntent);
+                return true;
             }
         });
 

@@ -1,0 +1,38 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.eventtv.messenger.app-mergeReleaseResources-23:/values-v16/values-v16.xml",
+            "map": [
+                {
+                    "source": "/home/ubuntu/.gradle/caches/transforms-3/731a674e239f34d76ecd3d5a852a9ad5/transformed/appcompat-1.6.1/res/values-v16/values-v16.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "5",
+                        "endColumns": "12",
+                        "endOffsets": "223"
+                    },
+                    "to": {
+                        "startLines": "3",
+                        "startColumns": "4",
+                        "startOffsets": "121",
+                        "endLines": "6",
+                        "endColumns": "12",
+                        "endOffsets": "289"
+                    }
+                },
+                {
+                    "source": "/home/ubuntu/.gradle/caches/transforms-3/d8d2704662b45736df6ff43f891c6e09/transformed/core-1.12.0/res/values-v16/values-v16.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "65",
+                        "endOffsets": "116"
+                    }
+                }
+            ]
+        }
+    ]
+}
