@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,7 +26,7 @@ import com.google.firebase.messaging.FirebaseMessaging;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    public static final String CHANNEL_ID = "eventtv_messages";
+    public static final String CHANNEL_ID = "eventtv_messages_v2"; // v2: 소리+진동 설정 추가
 
     // 파일 선택 콜백
     private ValueCallback<Uri[]> filePathCallback;
@@ -59,24 +61,6 @@ public class MainActivity extends AppCompatActivity {
         // 알림 채널 생성 (Android 8.0+)
         createNotificationChannel();
 
-        // FCM 토큰 가져오기
-        FirebaseMessaging.getInstance().getToken()
-            .addOnCompleteListener(task -> {
-                if (task.isSuccessful()) {
-                    String token = task.getResult();
-                    // 토큰을 WebView의 JavaScript로 전달
-                    if (webView != null) {
-                        webView.post(() ->
-                            webView.evaluateJavascript(
-                                "window.fcmToken = '" + token + "'; " +
-                                "if (window.onFcmToken) window.onFcmToken('" + token + "');",
-                                null
-                            )
-                        );
-                    }
-                }
-            });
-
         webView = findViewById(R.id.webview);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -103,6 +87,27 @@ public class MainActivity extends AppCompatActivity {
                 // 외부 링크는 브라우저로
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // 페이지 로드 완료 후 저장된 FCM 토큰이 있으면 재전달
+                // (FCM 토큰이 페이지 로드보다 먼저 도착한 경우 대비)
+                FirebaseMessaging.getInstance().getToken()
+                    .addOnCompleteListener(task -> {
+                        if (task.isSuccessful() && task.getResult() != null) {
+                            String fcmToken = task.getResult();
+                            view.post(() ->
+                                view.evaluateJavascript(
+                                    "window.fcmToken = '" + fcmToken + "'; " +
+                                    "window.__fcmToken = '" + fcmToken + "'; " +
+                                    "if (window.onFcmToken) window.onFcmToken('" + fcmToken + "');",
+                                    null
+                                )
+                            );
+                        }
+                    });
             }
         });
 
@@ -160,6 +165,26 @@ public class MainActivity extends AppCompatActivity {
         handleIntent(getIntent());
 
         webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
+
+        // FCM 토큰 가져오기 (webView 초기화 후에 실행해야 webView가 null이 아님)
+        FirebaseMessaging.getInstance().getToken()
+            .addOnCompleteListener(task -> {
+                if (task.isSuccessful()) {
+                    String token = task.getResult();
+                    android.util.Log.d("EventTV", "[FCM] 토큰 획득: " + token.substring(0, Math.min(20, token.length())) + "...");
+                    // 토큰을 WebView의 JavaScript로 전달
+                    webView.post(() ->
+                        webView.evaluateJavascript(
+                            "window.fcmToken = '" + token + "'; " +
+                            "window.__fcmToken = '" + token + "'; " +
+                            "if (window.onFcmToken) window.onFcmToken('" + token + "');",
+                            null
+                        )
+                    );
+                } else {
+                    android.util.Log.w("EventTV", "[FCM] 토큰 획득 실패: " + task.getException());
+                }
+            });
     }
 
     @Override
@@ -174,6 +199,42 @@ public class MainActivity extends AppCompatActivity {
             if (webView != null && url != null) {
                 webView.loadUrl(url);
             }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 앱이 포그라운드로 돌아올 때 소켓으로 서버에 알림 → FCM 발송 차단
+        if (webView != null) {
+            webView.post(() ->
+                webView.evaluateJavascript(
+                    "(function() {" +
+                    "  window._androidIsInForeground = true;" +
+                    "  var s = window._messengerSocket;" +
+                    "  if (s && s.connected) { s.emit('app_foreground'); console.log('[Android] app_foreground 전송'); }" +
+                    "})()",
+                    null
+                )
+            );
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 앱이 백그라운드로 갈 때 소켓으로 서버에 알림 → FCM 발송 허용
+        if (webView != null) {
+            webView.post(() ->
+                webView.evaluateJavascript(
+                    "(function() {" +
+                    "  window._androidIsInForeground = false;" +
+                    "  var s = window._messengerSocket;" +
+                    "  if (s && s.connected) { s.emit('app_background'); console.log('[Android] app_background 전송'); }" +
+                    "})()",
+                    null
+                )
+            );
         }
     }
 
@@ -216,6 +277,13 @@ public class MainActivity extends AppCompatActivity {
             channel.setDescription("EventTV 메신저 알림");
             channel.enableVibration(true);
             channel.setVibrationPattern(new long[]{0, 300, 100, 300});
+            // 알림 소리 설정
+            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build();
+            channel.setSound(soundUri, audioAttributes);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
