@@ -26,7 +26,10 @@ import com.google.firebase.messaging.FirebaseMessaging;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    public static final String CHANNEL_ID = "eventtv_messages_v2"; // v2: 소리+진동 설정 추가
+    public static final String CHANNEL_ID = "eventtv_messages_v4";
+    public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
+    // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
+    public static boolean isInForeground = false;
 
     // 파일 선택 콜백
     private ValueCallback<Uri[]> filePathCallback;
@@ -85,15 +88,18 @@ public class MainActivity extends AppCompatActivity {
                     return false; // WebView 내에서 처리
                 }
                 // 외부 링크는 브라우저로
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (Exception e) {
+                    android.util.Log.e("EventTV", "URL open error: " + e.getMessage());
+                }
                 return true;
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // 페이지 로드 완료 후 저장된 FCM 토큰이 있으면 재전달
-                // (FCM 토큰이 페이지 로드보다 먼저 도착한 경우 대비)
+                // 페이지 로드 완료 후 FCM 토큰 재전달 (타이밍 문제 대비)
                 FirebaseMessaging.getInstance().getToken()
                     .addOnCompleteListener(task -> {
                         if (task.isSuccessful() && task.getResult() != null) {
@@ -166,13 +172,12 @@ public class MainActivity extends AppCompatActivity {
 
         webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
 
-        // FCM 토큰 가져오기 (webView 초기화 후에 실행해야 webView가 null이 아님)
+        // FCM 토큰 가져오기 (webView 초기화 후에 실행)
         FirebaseMessaging.getInstance().getToken()
             .addOnCompleteListener(task -> {
-                if (task.isSuccessful()) {
+                if (task.isSuccessful() && task.getResult() != null) {
                     String token = task.getResult();
                     android.util.Log.d("EventTV", "[FCM] 토큰 획득: " + token.substring(0, Math.min(20, token.length())) + "...");
-                    // 토큰을 WebView의 JavaScript로 전달
                     webView.post(() ->
                         webView.evaluateJavascript(
                             "window.fcmToken = '" + token + "'; " +
@@ -197,6 +202,9 @@ public class MainActivity extends AppCompatActivity {
         if (intent != null && intent.hasExtra("url")) {
             String url = intent.getStringExtra("url");
             if (webView != null && url != null) {
+                if (!url.startsWith("http")) {
+                    url = "https://eventtv-gpdc5ulb.manus.space" + (url.startsWith("/") ? url : "/" + url);
+                }
                 webView.loadUrl(url);
             }
         }
@@ -205,15 +213,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 앱이 포그라운드로 돌아올 때 소켓으로 서버에 알림 → FCM 발송 차단
+        // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
+        isInForeground = true;
+        // 소켓으로도 서버에 알림
         if (webView != null) {
             webView.post(() ->
                 webView.evaluateJavascript(
-                    "(function() {" +
-                    "  window._androidIsInForeground = true;" +
-                    "  var s = window._messengerSocket;" +
-                    "  if (s && s.connected) { s.emit('app_foreground'); console.log('[Android] app_foreground 전송'); }" +
-                    "})()",
+                    "window._androidIsInForeground = true; " +
+                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
+                    "  window._messengerSocket.emit('app_foreground'); " +
+                    "}",
                     null
                 )
             );
@@ -223,15 +232,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // 앱이 백그라운드로 갈 때 소켓으로 서버에 알림 → FCM 발송 허용
+        // 정적 변수로 백그라운드 상태 설정
+        isInForeground = false;
+        // 소켓으로도 서버에 알림
         if (webView != null) {
             webView.post(() ->
                 webView.evaluateJavascript(
-                    "(function() {" +
-                    "  window._androidIsInForeground = false;" +
-                    "  var s = window._messengerSocket;" +
-                    "  if (s && s.connected) { s.emit('app_background'); console.log('[Android] app_background 전송'); }" +
-                    "})()",
+                    "window._androidIsInForeground = false; " +
+                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
+                    "  window._messengerSocket.emit('app_background'); " +
+                    "}",
                     null
                 )
             );
@@ -242,7 +252,6 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (webView != null) {
             // JS에 androidBack 커스텀 이벤트를 먼저 전달
-            // 이벤트를 JS에서 처리했는지 여부를 콜백으로 받음
             webView.evaluateJavascript(
                 "(function() {" +
                 "  var e = new CustomEvent('androidBack', { cancelable: true });" +
@@ -251,7 +260,6 @@ public class MainActivity extends AppCompatActivity {
                 "})()",
                 value -> {
                     if (value == null || !value.contains("handled")) {
-                        // JS에서 처리하지 않은 경우
                         runOnUiThread(() -> {
                             if (webView.canGoBack()) {
                                 webView.goBack();
@@ -269,6 +277,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 메인 알림 채널 (높은 우선순위 - 소리 + 진동)
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 "EventTV 메시지",
@@ -276,17 +285,30 @@ public class MainActivity extends AppCompatActivity {
             );
             channel.setDescription("EventTV 메신저 알림");
             channel.enableVibration(true);
-            channel.setVibrationPattern(new long[]{0, 300, 100, 300});
-            // 알림 소리 설정
+            channel.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700, 200, 700, 200, 700, 200, 700});
+            channel.enableLights(true);
+            channel.setLightColor(0xFF00FF00);
             Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
             AudioAttributes audioAttributes = new AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .build();
             channel.setSound(soundUri, audioAttributes);
+
+            // 포그라운드 알림 채널 (낮은 우선순위 - 소리/진동 없음)
+            NotificationChannel fgChannel = new NotificationChannel(
+                CHANNEL_ID_FOREGROUND,
+                "EventTV 앱 내 알림",
+                NotificationManager.IMPORTANCE_LOW
+            );
+            fgChannel.setDescription("앱 사용 중 알림");
+            fgChannel.enableVibration(false);
+            fgChannel.setSound(null, null);
+
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
+                manager.createNotificationChannel(fgChannel);
             }
         }
     }
