@@ -179,8 +179,28 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView != null) {
+            // JS에 androidBack 커스텀 이벤트를 먼저 전달
+            // 이벤트를 JS에서 처리했는지 여부를 콜백으로 받음
+            webView.evaluateJavascript(
+                "(function() {" +
+                "  var e = new CustomEvent('androidBack', { cancelable: true });" +
+                "  var handled = !window.dispatchEvent(e);" +
+                "  return handled ? 'handled' : 'nothandled';" +
+                "})()",
+                value -> {
+                    if (value == null || !value.contains("handled")) {
+                        // JS에서 처리하지 않은 경우
+                        runOnUiThread(() -> {
+                            if (webView.canGoBack()) {
+                                webView.goBack();
+                            } else {
+                                MainActivity.super.onBackPressed();
+                            }
+                        });
+                    }
+                }
+            );
         } else {
             super.onBackPressed();
         }
