@@ -3,6 +3,7 @@ package com.eventtv.messenger;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -10,6 +11,8 @@ import android.webkit.JavascriptInterface;
 
 public class AndroidBridge {
     private final Context context;
+    static final String PREFS_NAME = "eventtv_prefs";
+    static final String KEY_EMPLOYEE_ID = "employee_id";  // employeeId 저장 (숫자)
 
     public AndroidBridge(Context context) {
         this.context = context;
@@ -31,6 +34,37 @@ public class AndroidBridge {
     @JavascriptInterface
     public void log(String message) {
         android.util.Log.d("EventTV", message);
+    }
+
+    /**
+     * 직원 로그인 시 호출 - employeeId를 SharedPreferences에 저장
+     * FCM 토큰 갱신(onNewToken) 시 서버 업데이트에 사용
+     * @param employeeId 직원 ID (숫자 문자열)
+     */
+    @JavascriptInterface
+    public void onEmployeeLogin(String employeeId) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit().putString(KEY_EMPLOYEE_ID, employeeId).apply();
+            android.util.Log.d("EventTV", "[FCM] onEmployeeLogin - employeeId: " + employeeId);
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "onEmployeeLogin error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 직원 로그아웃 시 호출 - SharedPreferences에서 employeeId 제거
+     * @param employeeId 직원 ID (숫자 문자열)
+     */
+    @JavascriptInterface
+    public void onEmployeeLogout(String employeeId) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit().remove(KEY_EMPLOYEE_ID).apply();
+            android.util.Log.d("EventTV", "[FCM] onEmployeeLogout - employeeId: " + employeeId);
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "onEmployeeLogout error: " + e.getMessage());
+        }
     }
 
     /**
