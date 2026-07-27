@@ -49,6 +49,15 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         if (remoteMessage.getData().containsKey("url"))
             url = remoteMessage.getData().get("url");
 
+        // 배지 숫자 (서버에서 전달한 전체 읽지 않은 메시지 수)
+        int badgeCount = 1;
+        if (remoteMessage.getData().containsKey("badge")) {
+            try {
+                badgeCount = Integer.parseInt(remoteMessage.getData().get("badge"));
+                if (badgeCount < 1) badgeCount = 1;
+            } catch (NumberFormatException ignored) {}
+        }
+
         // 포그라운드 상태이면 알림 표시 안 함 (앱이 열려있을 때)
         if (MainActivity.isInForeground) {
             return;
@@ -117,6 +126,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setTimeoutAfter(5000L)
+            .setNumber(badgeCount)  // 앱 아이콘 배지 숫자 (실제 읽지 않은 메시지 수)
             .setContentIntent(pendingIntent);
 
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
