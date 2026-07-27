@@ -22,6 +22,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
+import me.leolin.shortcutbadger.ShortcutBadger;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -215,6 +216,10 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
+        // 앱 포그라운드 진입 시 배지 초기화
+        try {
+            ShortcutBadger.removeCount(getApplicationContext());
+        } catch (Exception ignored) {}
         // 소켓으로도 서버에 알림
         if (webView != null) {
             webView.post(() ->

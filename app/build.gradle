@@ -2,19 +2,16 @@ plugins {
     id 'com.android.application'
     id 'com.google.gms.google-services'
 }
-
 android {
     namespace 'com.eventtv.messenger'
     compileSdk 34
-
     defaultConfig {
         applicationId "com.eventtv.messenger"
         minSdk 21
         targetSdk 34
-        versionCode 13
-        versionName "1.4.5"
+        versionCode 14
+        versionName "1.4.6"
     }
-
     buildTypes {
         release {
             minifyEnabled false
@@ -22,13 +19,11 @@ android {
             signingConfig signingConfigs.debug
         }
     }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
 }
-
 configurations.all {
     resolutionStrategy {
         force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
@@ -36,10 +31,10 @@ configurations.all {
         force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
     }
 }
-
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core:1.12.0'
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-messaging'
+    implementation 'me.leolin:ShortcutBadger:1.1.22@aar'
 }
