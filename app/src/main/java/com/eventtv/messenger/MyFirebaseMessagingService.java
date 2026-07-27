@@ -75,13 +75,16 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             }
         }
 
-        // 알림음 직접 재생 (MediaPlayer 방식 - v1.4.2와 동일)
+        // 알림음 직접 재생 (MediaPlayer 방식 - 볼륨 2/3)
         try {
             AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (audioManager != null) {
+                int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
+                // 현재 볼륨의 2/3로 설정 (최대 볼륨 기준)
+                int targetVol = (int) Math.round(maxVol * 2.0 / 3.0);
                 audioManager.setStreamVolume(
                     AudioManager.STREAM_NOTIFICATION,
-                    audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION),
+                    targetVol,
                     0
                 );
             }
@@ -96,6 +99,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 .build());
             mediaPlayer.setDataSource(getApplicationContext(), soundUri);
             mediaPlayer.setLooping(false);
+            // MediaPlayer 자체 볼륨도 0.67로 설정 (좌/우 채널 각각)
+            mediaPlayer.setVolume(0.67f, 0.67f);
             mediaPlayer.prepare();
             mediaPlayer.start();
 
