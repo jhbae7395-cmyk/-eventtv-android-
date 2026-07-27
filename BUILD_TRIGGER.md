@@ -1,1 +1,1 @@
-v1.4.3 build trigger - 20260727_000013
+Build trigger v1.4.4 - badge count fix 2026-07-27 00:50:30.321653
