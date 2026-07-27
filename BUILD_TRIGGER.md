@@ -1,1 +1,1 @@
-Build triggered at 2026-07-26 23:37:27 UTC - v1.3.0 FCM fix
+v1.4.3 build trigger - 20260727_000013
