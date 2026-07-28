@@ -10,6 +10,7 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.webkit.JavascriptInterface;
+import me.leolin.shortcutbadger.ShortcutBadger;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -112,13 +113,23 @@ public class AndroidBridge {
     }
 
     /**
-     * 웹 JS에서 직접 배지 숫자 저장 (참조용)
-     * FCM 알림이 배지 역할 담당하므로 사일런트 알림 발행 안 함
+     * 웹 JS에서 직접 배지 숫자 업데이트 - ShortcutBadger로 런처 아이콘 배지 표시
      */
     @JavascriptInterface
     public void applyBadgeCount(int count) {
         MainActivity.currentUnreadCount = count;
-        android.util.Log.d("EventTV", "[배지] 미읽음 수 저장: " + count);
+        android.util.Log.d("EventTV", "[배지] 미읽음 수 업데이트: " + count);
+        try {
+            if (count > 0) {
+                boolean result = ShortcutBadger.applyCount(context, count);
+                android.util.Log.d("EventTV", "[배지] ShortcutBadger.applyCount(" + count + ") = " + result);
+            } else {
+                boolean result = ShortcutBadger.removeCount(context);
+                android.util.Log.d("EventTV", "[배지] ShortcutBadger.removeCount() = " + result);
+            }
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] ShortcutBadger 오류: " + e.getMessage());
+        }
     }
 
     /**
@@ -128,6 +139,13 @@ public class AndroidBridge {
     public void clearBadgeCount() {
         MainActivity.currentUnreadCount = 0;
         android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
+        // ShortcutBadger로 런처 배지 제거
+        try {
+            boolean result = ShortcutBadger.removeCount(context);
+            android.util.Log.d("EventTV", "[배지] ShortcutBadger.removeCount() = " + result);
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] ShortcutBadger 오류: " + e.getMessage());
+        }
         // FCM 배지 알림도 취소
         try {
             android.app.NotificationManager nm = (android.app.NotificationManager)
@@ -170,6 +188,14 @@ public class AndroidBridge {
                         .getInt("total");
                     android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
                     MainActivity.currentUnreadCount = total;
+                    // ShortcutBadger로 런처 배지 업데이트
+                    try {
+                        if (total > 0) {
+                            ShortcutBadger.applyCount(context, total);
+                        } else {
+                            ShortcutBadger.removeCount(context);
+                        }
+                    } catch (Exception ignored) {}
                     // 사일런트 알림 발행 안 함 - FCM 알림이 배지 역할 담당
                 }
                 conn.disconnect();
