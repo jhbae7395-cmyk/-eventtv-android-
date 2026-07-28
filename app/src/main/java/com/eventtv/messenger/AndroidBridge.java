@@ -4,6 +4,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -86,9 +87,21 @@ public class AndroidBridge {
     public void setNotificationVolume(int volume) {
         if (volume < 0) volume = 0;
         if (volume > 100) volume = 100;
+        // SharedPreferences에 저장
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().putInt(KEY_NOTIFICATION_VOLUME, volume).apply();
-        android.util.Log.d("EventTV", "[설정] 알림 볼륨: " + volume);
+        // AudioManager로 시스템 알림 볼륨 직접 변경 (Android 8+에서도 즉시 적용)
+        try {
+            AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager != null) {
+                int maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
+                int targetVolume = Math.round(volume / 100.0f * maxVolume);
+                audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, targetVolume, 0);
+                android.util.Log.d("EventTV", "[설정] 알림 볼륨: " + volume + "% → 시스템 " + targetVolume + "/" + maxVolume);
+            }
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[설정] 알림 볼륨 AudioManager 오류: " + e.getMessage());
+        }
     }
 
     /**

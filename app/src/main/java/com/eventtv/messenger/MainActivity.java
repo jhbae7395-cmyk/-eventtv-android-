@@ -30,11 +30,11 @@ public class MainActivity extends AppCompatActivity {
     public static final String CHANNEL_ID = "eventtv_messages_v4";
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
 
-    // 진동별 채널 ID (v5: 소리 null로 변경 - MediaPlayer가 볼륨 제어하여 소리 재생)
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v5";     // 진동 없음
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v5";   // 짧게 300ms
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v5"; // 기본 700ms
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v5";    // 길게 1500ms
+    // 진동별 채널 ID (v6: 소리 재활성화 - 볼륨은 AndroidBridge.setNotificationVolume()이 AudioManager로 직접 제어)
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v6";     // 진동 없음
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v6";   // 짧게 300ms
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v6"; // 기본 700ms
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v6";    // 길게 1500ms
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
@@ -156,10 +156,10 @@ public class MainActivity extends AppCompatActivity {
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager == null) return;
 
-            // v5 채널: 소리 null - MediaPlayer가 볼륨 제어하여 소리 재생
+            // v6 채널: 소리 재활성화 - 볼륨은 AudioManager.setStreamVolume()으로 직접 제어
             // (Android 8+에서 채널 소리는 앱 코드로 볼륨 조절 불가 → MediaPlayer 방식으로 전환)
 
-            // ── 진동 없음 채널 (v5) ──────────────────────────────────────────────
+            // ── 진동 없음 채널 (v6) ──────────────────────────────────────────────
             NotificationChannel chVibOff = new NotificationChannel(
                 CHANNEL_VIB_OFF, "EventTV 메시지 (진동 없음)", NotificationManager.IMPORTANCE_HIGH);
             chVibOff.setDescription("EventTV 메신저 알림 - 진동 없음");
@@ -167,10 +167,10 @@ public class MainActivity extends AppCompatActivity {
             chVibOff.enableVibration(false);
             chVibOff.enableLights(true);
             chVibOff.setLightColor(0xFF00FF00);
-            chVibOff.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
+            chVibOff.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(chVibOff);
 
-            // ── 짧게 (300ms) 채널 (v5) ──────────────────────────────────────────
+            // ── 짧게 (300ms) 채널 (v6) ──────────────────────────────────────────
             NotificationChannel chVibShort = new NotificationChannel(
                 CHANNEL_VIB_SHORT, "EventTV 메시지 (짧은 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibShort.setDescription("EventTV 메신저 알림 - 짧은 진동 300ms");
@@ -179,10 +179,10 @@ public class MainActivity extends AppCompatActivity {
             chVibShort.setVibrationPattern(new long[]{0, 300, 100, 300, 100, 300});
             chVibShort.enableLights(true);
             chVibShort.setLightColor(0xFF00FF00);
-            chVibShort.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
+            chVibShort.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(chVibShort);
 
-            // ── 기본 (700ms) 채널 (v5) ──────────────────────────────────────────
+            // ── 기본 (700ms) 채널 (v6) ──────────────────────────────────────────
             NotificationChannel chVibDefault = new NotificationChannel(
                 CHANNEL_VIB_DEFAULT, "EventTV 메시지 (기본 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibDefault.setDescription("EventTV 메신저 알림 - 기본 진동 700ms");
@@ -191,10 +191,10 @@ public class MainActivity extends AppCompatActivity {
             chVibDefault.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
             chVibDefault.enableLights(true);
             chVibDefault.setLightColor(0xFF00FF00);
-            chVibDefault.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
+            chVibDefault.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(chVibDefault);
 
-            // ── 길게 (1500ms) 채널 (v5) ─────────────────────────────────────────
+            // ── 길게 (1500ms) 채널 (v6) ─────────────────────────────────────────
             NotificationChannel chVibLong = new NotificationChannel(
                 CHANNEL_VIB_LONG, "EventTV 메시지 (긴 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibLong.setDescription("EventTV 메신저 알림 - 긴 진동 1500ms");
@@ -203,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
             chVibLong.setVibrationPattern(new long[]{0, 1500, 300, 1500, 300, 1500});
             chVibLong.enableLights(true);
             chVibLong.setLightColor(0xFF00FF00);
-            chVibLong.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
+            chVibLong.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(chVibLong);
 
             // ── 포그라운드 알림 채널 (낮은 우선순위 - 소리/진동 없음) ──────────
@@ -223,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
             legacyChannel.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
             legacyChannel.enableLights(true);
             legacyChannel.setLightColor(0xFF00FF00);
-            legacyChannel.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
+            legacyChannel.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(legacyChannel);
         }
     }

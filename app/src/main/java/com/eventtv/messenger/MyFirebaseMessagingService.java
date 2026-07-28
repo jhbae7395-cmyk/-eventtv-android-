@@ -4,8 +4,6 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.media.AudioManager;
-import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
@@ -90,14 +88,19 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         SharedPreferences vibPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         int vibDurationMs = vibPrefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
 
-        // Android 7 이하에서만 직접 진동 (Android 8+는 채널에서 처리)
-        if (vibDurationMs > 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        // 진동 직접 처리 (Android 7 이하 + Android 8+ 모두)
+        // Android 8+에서 채널 소리가 null이면 진동도 억제되는 기기가 있어 직접 처리
+        if (vibDurationMs > 0) {
             long vd = vibDurationMs;
             long gap = Math.max(100, vd / 3);
             long[] vibrationPattern = {0, vd, gap, vd, gap, vd};
             Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
             if (vibrator != null && vibrator.hasVibrator()) {
-                vibrator.vibrate(vibrationPattern, -1);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, -1));
+                } else {
+                    vibrator.vibrate(vibrationPattern, -1);
+                }
             }
         }
 
@@ -120,30 +123,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         // 알림 소리 설정 확인 (SharedPreferences)
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
-        int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
-        float volumeFloat = volumePct / 100.0f;
-
-        // 알림음 재생 - MediaPlayer 방식으로 볼륨 직접 적용
-        // Android 8.0+에서는 NotificationChannel 소리가 우선이므로
-        // 채널 소리를 null로 설정하고 MediaPlayer로 직접 재생하여 볼륨 제어
-        if (soundEnabled) {
-            try {
-                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-                if (soundUri != null) {
-                    MediaPlayer mp = new MediaPlayer();
-                    mp.setAudioStreamType(AudioManager.STREAM_NOTIFICATION);
-                    mp.setDataSource(getApplicationContext(), soundUri);
-                    mp.setVolume(volumeFloat, volumeFloat);
-                    mp.setOnPreparedListener(MediaPlayer::start);
-                    mp.setOnCompletionListener(MediaPlayer::release);
-                    mp.prepareAsync();
-                    android.util.Log.d("EventTV", "알림음 재생 (MediaPlayer) 볼륨: " + volumePct + "%");
-                }
-            } catch (Exception e) {
-                android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
-            }
-        }
+        // 볼륨은 AndroidBridge.setNotificationVolume() 저장 시 AudioManager로 직접 적용됨
+        // 여기서는 채널 소리 설정만 사용 (채널이 소리 재생 담당)
 
         // 팝업 알림 발행 (배지 알림과 다른 ID 사용)
         Intent intent = new Intent(this, MainActivity.class);
@@ -164,7 +145,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(badgeCount)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-            .setSound(null)                // 소리 비활성화 - MediaPlayer가 볼륨 제어하여 재생
+            .setSound(soundEnabled ? RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) : null)
             .setContentIntent(pendingIntent);
 
         // 팝업 알림 ID: channelId 기반으로 고정 → 같은 채널의 새 메시지는 이전 알림을 덮어씀
