@@ -118,16 +118,19 @@ public class AndroidBridge {
      */
     @JavascriptInterface
     public void applyBadgeCount(int count) {
-        try {
-            if (count > 0) {
-                ShortcutBadger.applyCount(context, count);
-                android.util.Log.d("EventTV", "[배지] 설정: " + count);
-            } else {
-                ShortcutBadger.removeCount(context);
-                android.util.Log.d("EventTV", "[배지] 제거");
+        // 현재 미읽음 수 저장 (백그라운드 전환 시 사일런트 알림에 사용)
+        MainActivity.currentUnreadCount = count;
+        android.util.Log.d("EventTV", "[배지] 미읽음 수 저장: " + count);
+        // 백그라운드 상태이면 즉시 사일런트 알림 업데이트
+        if (!MainActivity.isInForeground) {
+            if (context instanceof MainActivity) {
+                MainActivity activity = (MainActivity) context;
+                if (count > 0) {
+                    activity.showBadgeNotification(count);
+                } else {
+                    activity.clearBadgeNotification();
+                }
             }
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[배지] applyBadgeCount 오류: " + e.getMessage());
         }
     }
 
@@ -136,12 +139,13 @@ public class AndroidBridge {
      */
     @JavascriptInterface
     public void clearBadgeCount() {
-        try {
-            ShortcutBadger.removeCount(context);
-            android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[배지] clearBadgeCount 오류: " + e.getMessage());
+        MainActivity.currentUnreadCount = 0;
+        if (!MainActivity.isInForeground) {
+            if (context instanceof MainActivity) {
+                ((MainActivity) context).clearBadgeNotification();
+            }
         }
+        android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
     }
 
     /**
@@ -177,10 +181,16 @@ public class AndroidBridge {
                         .getJSONObject("json")
                         .getInt("total");
                     android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
-                    if (total > 0) {
-                        ShortcutBadger.applyCount(context, total);
-                    } else {
-                        ShortcutBadger.removeCount(context);
+                    MainActivity.currentUnreadCount = total;
+                    if (context instanceof MainActivity) {
+                        final int finalTotal = total;
+                        ((MainActivity) context).runOnUiThread(() -> {
+                            if (finalTotal > 0) {
+                                ((MainActivity) context).showBadgeNotification(finalTotal);
+                            } else {
+                                ((MainActivity) context).clearBadgeNotification();
+                            }
+                        });
                     }
                 }
                 conn.disconnect();

@@ -39,6 +39,13 @@ public class MainActivity extends AppCompatActivity {
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
 
+    // 배지 전용 사일런트 알림 채널 ID (소리/진동 없이 배지 숫자만 표시)
+    public static final String CHANNEL_BADGE = "eventtv_badge_silent";
+    // 배지 전용 알림 ID (항상 동일한 ID로 업데이트)
+    public static final int BADGE_NOTIFICATION_ID = 99999;
+    // 현재 미읽음 수 (JS에서 업데이트)
+    public static int currentUnreadCount = 0;
+
     // 파일 선택 콜백
     private ValueCallback<Uri[]> filePathCallback;
     private final ActivityResultLauncher<Intent> fileChooserLauncher =
@@ -260,6 +267,56 @@ public class MainActivity extends AppCompatActivity {
                 )
             );
         }
+        // 백그라운드 전환 시 미읽음 수가 있으면 배지 전용 사일런트 알림 발행
+        if (currentUnreadCount > 0) {
+            showBadgeNotification(currentUnreadCount);
+        } else {
+            clearBadgeNotification();
+        }
+    }
+
+    /**
+     * 배지 전용 사일런트 알림 발행 (소리/진동 없이 배지 숫자만 표시)
+     */
+    public void showBadgeNotification(int count) {
+        try {
+            android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
+                this, 0,
+                new Intent(this, MainActivity.class),
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    ? android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
+                    : android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            );
+            androidx.core.app.NotificationCompat.Builder builder =
+                new androidx.core.app.NotificationCompat.Builder(this, CHANNEL_BADGE)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle("EventTV 메신저")
+                    .setContentText("미읽음 메시지 " + count + "개")
+                    .setNumber(count)
+                    .setBadgeIconType(androidx.core.app.NotificationCompat.BADGE_ICON_SMALL)
+                    .setContentIntent(pendingIntent)
+                    .setAutoCancel(false)
+                    .setSilent(true)  // 소리/진동 없이 배지만 표시
+                    .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW);
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(BADGE_NOTIFICATION_ID, builder.build());
+            android.util.Log.d("EventTV", "[배지] 사일런트 알림 발행: " + count);
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] showBadgeNotification 오류: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 배지 알림 제거 (미읽음 0일 때)
+     */
+    public void clearBadgeNotification() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(BADGE_NOTIFICATION_ID);
+            android.util.Log.d("EventTV", "[배지] 사일런트 알림 제거");
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] clearBadgeNotification 오류: " + e.getMessage());
+        }
     }
 
     @Override
@@ -366,6 +423,16 @@ public class MainActivity extends AppCompatActivity {
             legacyChannel.setLightColor(0xFF00FF00);
             legacyChannel.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(legacyChannel);
+
+            // ── 배지 전용 사일런트 채널 (소리/진동 없이 배지 숫자만 표시) ────────────────
+            NotificationChannel badgeChannel = new NotificationChannel(
+                CHANNEL_BADGE, "EventTV 미읽음 배지", NotificationManager.IMPORTANCE_MIN);
+            badgeChannel.setDescription("알림 없이 배지 숫자만 표시");
+            badgeChannel.setShowBadge(true);
+            badgeChannel.enableVibration(false);
+            badgeChannel.setSound(null, null);
+            badgeChannel.enableLights(false);
+            manager.createNotificationChannel(badgeChannel);
         }
     }
 }
