@@ -229,8 +229,18 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
-        // 앱 포그라운드 진입 시 알림 취소 안 함 - 실제 메시지를 읽어야만 배지 감소
-        // 소켓으로도 서버에 알림
+        // 앱 포그라운드 진입 시 알림 트레이의 FCM 알림 모두 취소 → 아이콘 배지 제거
+        // (알림 트레이에 setNumber가 있으면 ShortcutBadger보다 우선 표시되므로 반드시 취소)
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancelAll();
+        } catch (Exception ignored) {}
+        // ShortcutBadger도 0으로 초기화
+        try {
+            me.leolin.shortcutbadger.ShortcutBadger.removeCount(this);
+        } catch (Exception ignored) {}
+        // 소켓으로 포그라운드 상태 서버에 알림 (badge_sync 이벤트 수신용)
         if (webView != null) {
             webView.post(() ->
                 webView.evaluateJavascript(
