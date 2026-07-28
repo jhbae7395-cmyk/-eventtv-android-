@@ -5,9 +5,19 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.webkit.JavascriptInterface;
+import me.leolin.shortcutbadger.ShortcutBadger;
+import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 public class AndroidBridge {
     private final Context context;
@@ -100,6 +110,84 @@ public class AndroidBridge {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().putInt(KEY_VIBRATION_DURATION, durationMs).apply();
         android.util.Log.d("EventTV", "[설정] 진동 시간: " + durationMs + "ms");
+    }
+
+    /**
+     * 웹 JS에서 직접 배지 숫자 설정
+     * @param count 배지 숫자
+     */
+    @JavascriptInterface
+    public void applyBadgeCount(int count) {
+        try {
+            if (count > 0) {
+                ShortcutBadger.applyCount(context, count);
+                android.util.Log.d("EventTV", "[배지] 설정: " + count);
+            } else {
+                ShortcutBadger.removeCount(context);
+                android.util.Log.d("EventTV", "[배지] 제거");
+            }
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] applyBadgeCount 오류: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 웹 JS에서 배지 제거
+     */
+    @JavascriptInterface
+    public void clearBadgeCount() {
+        try {
+            ShortcutBadger.removeCount(context);
+            android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] clearBadgeCount 오류: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 서버에서 전체 미읽음 메시지 수를 조회하여 배지 업데이트
+     * 앱 실행 시 호출하여 배지를 최신 상태로 동기화
+     * @param employeeToken 직원 인증 토큰
+     */
+    @JavascriptInterface
+    public void updateBadgeFromServer(String employeeToken) {
+        if (employeeToken == null || employeeToken.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                String apiUrl = "https://eventtv-gpdc5ulb.manus.space/api/trpc/messenger.getTotalUnread?batch=1&input=" +
+                    java.net.URLEncoder.encode("{\"0\":{\"json\":{\"employeeToken\":\"" + employeeToken + "\"}}}" , "UTF-8");
+                URL url = new URL(apiUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+                    // tRPC batch 응답: [{"result":{"data":{"json":{"total":22}}}}]
+                    String body = sb.toString();
+                    org.json.JSONArray arr = new org.json.JSONArray(body);
+                    int total = arr.getJSONObject(0)
+                        .getJSONObject("result")
+                        .getJSONObject("data")
+                        .getJSONObject("json")
+                        .getInt("total");
+                    android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
+                    if (total > 0) {
+                        ShortcutBadger.applyCount(context, total);
+                    } else {
+                        ShortcutBadger.removeCount(context);
+                    }
+                }
+                conn.disconnect();
+            } catch (Exception e) {
+                android.util.Log.e("EventTV", "[배지] 서버 조회 실패: " + e.getMessage());
+            }
+        }).start();
     }
 
     /**

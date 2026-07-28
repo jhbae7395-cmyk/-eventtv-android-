@@ -223,13 +223,11 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
-        // 앱 포그라운드 진입 시 모든 알림 취소 + 배지 초기화
+        // 앱 포그라운드 진입 시 모든 알림 취소
+        // (배지는 제거하지 않음 - 알림을 확인하지 않아도 미읽음 수 표시 유지)
         try {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null) nm.cancelAll();  // 모든 알림 제거
-        } catch (Exception ignored) {}
-        try {
-            ShortcutBadger.removeCount(getApplicationContext());
         } catch (Exception ignored) {}
         // 소켓으로도 서버에 알림
         if (webView != null) {
