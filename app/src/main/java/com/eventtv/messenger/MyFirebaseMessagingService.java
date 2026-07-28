@@ -73,41 +73,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             android.util.Log.e("EventTV", "[배지] ShortcutBadger 오류: " + e.getMessage());
         }
 
-        // ── 1단계: 배지 전용 알림 업데이트 ──────────────────────────────────────
-        // BADGE_NOTIFICATION_ID(99999)는 배지 숫자만 표시하는 사일런트 알림
-        // 소리/진동 없는 채널(CHANNEL_VIB_OFF) 사용 → 알림 소리/진동 없음
-        // setOngoing(true)로 지속 유지 → 앱 열어도 자동 제거 안 됨
-        // 포그라운드/백그라운드 상관없이 항상 업데이트
-        {
-            Intent badgeIntent = new Intent(this, MainActivity.class);
-            badgeIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            int badgeFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-                : PendingIntent.FLAG_UPDATE_CURRENT;
-            PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
-
-            // 배지 전용 채널: 소리/진동 없음 (CHANNEL_VIB_OFF)
-            String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
-
-            NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("EventTV 메신저")
-                .setContentText(badgeCount + "개의 안읽은 메시지")
-                .setAutoCancel(false)
-                .setOngoing(true)
-                .setNumber(badgeCount)
-                .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-                .setSilent(true)          // 소리/진동 완전 억제 (API 26+)
-                .setContentIntent(badgePendingIntent);
-
-            // cancel → notify 순서로 setNumber() 강제 갱신
-            // (setOngoing 알림은 notify()만으로 숫자가 갱신 안 되는 Android 제약)
-            manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
-            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
-        }
-
-        // ── 2단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
+        // ── 1단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
+        // 배지 전용 알림(ID=99999) 제거 → ShortcutBadger만으로 런처 배지 제어
+        // (배지 전용 알림이 런처 배지 카운트에 +1로 포함되는 문제 해결)
         if (MainActivity.isInForeground) {
             return;
         }
