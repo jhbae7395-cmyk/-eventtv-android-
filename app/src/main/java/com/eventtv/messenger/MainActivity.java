@@ -157,7 +157,11 @@ public class MainActivity extends AppCompatActivity {
             if (manager == null) return;
 
             // v6 채널: 소리 재활성화 - 볼륨은 AudioManager.setStreamVolume()으로 직접 제어
-            // (Android 8+에서 채널 소리는 앱 코드로 볼륨 조절 불가 → MediaPlayer 방식으로 전환)
+            Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
+            android.media.AudioAttributes audioAttributes = new android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                .build();
 
             // ── 진동 없음 채널 (v6) ──────────────────────────────────────────────
             NotificationChannel chVibOff = new NotificationChannel(
