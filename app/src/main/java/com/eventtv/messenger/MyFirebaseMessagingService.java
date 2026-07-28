@@ -161,8 +161,16 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setSound(notifSoundUri)       // 소리 명시적 설정 (Android 7 이하 보완)
             .setContentIntent(pendingIntent);
 
-        // 팝업 알림은 고유한 ID(시간 기반)로 발행 → BADGE_NOTIFICATION_ID와 충돌 없음
-        int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
+        // 팝업 알림 ID: channelId 기반으로 고정 → 같은 채널의 새 메시지는 이전 알림을 덮어씀
+        // → 알림 센터에 채널 수만큼만 쌓임 → Samsung One UI 배지 숫자 정확
+        int channelIdInt = 0;
+        if (remoteMessage.getData().containsKey("channelId")) {
+            try {
+                channelIdInt = Integer.parseInt(remoteMessage.getData().get("channelId"));
+            } catch (NumberFormatException ignored) {}
+        }
+        // channelId가 0이면 시간 기반 ID 사용 (fallback)
+        int popupNotificationId = channelIdInt > 0 ? channelIdInt : (int) (System.currentTimeMillis() % 100000);
         manager.notify(popupNotificationId, builder.build());
     }
 
