@@ -163,7 +163,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
-            manager.notify((int) System.currentTimeMillis(), builder.build());
+            // 고정 ID(BADGE_NOTIFICATION_ID)로 발행하여 매번 덮어쓰기 → 배지 숫자 = badgeCount
+            // System.currentTimeMillis() ID는 매번 새 알림으로 쌓여 배지가 누적되는 문제 발생
+            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, builder.build());
         }
     }
 
