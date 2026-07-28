@@ -30,12 +30,11 @@ public class MainActivity extends AppCompatActivity {
     public static final String CHANNEL_ID = "eventtv_messages_v4";
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
 
-    // 진동별 채널 ID (Android 8.0+ 진동 패턴 제어용)
-    // v2: 채널 ID 변경으로 기존 채널 진동 설정 무시 문제 해결
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v3";     // 진동 없음
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v3";   // 짧게 300ms
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v3"; // 기본 700ms
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v3";    // 길게 1500ms
+    // 진동별 채널 ID (v5: 소리 null로 변경 - MediaPlayer가 볼륨 제어하여 소리 재생)
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v5";     // 진동 없음
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v5";   // 짧게 300ms
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v5"; // 기본 700ms
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v5";    // 길게 1500ms
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
@@ -52,18 +51,8 @@ public class MainActivity extends AppCompatActivity {
             if (filePathCallback == null) return;
             Uri[] results = null;
             if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                Intent data = result.getData();
-                if (data.getClipData() != null) {
-                    // 다중 파일 선택
-                    int count = data.getClipData().getItemCount();
-                    results = new Uri[count];
-                    for (int i = 0; i < count; i++) {
-                        results[i] = data.getClipData().getItemAt(i).getUri();
-                    }
-                } else if (data.getData() != null) {
-                    // 단일 파일 선택
-                    results = new Uri[]{data.getData()};
-                }
+                Uri dataUri = result.getData().getData();
+                if (dataUri != null) results = new Uri[]{dataUri};
             }
             filePathCallback.onReceiveValue(results);
             filePathCallback = null;
@@ -75,222 +64,91 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 알림 채널 생성 (Android 8.0+)
-        createNotificationChannel();
-
-        webView = findViewById(R.id.webview);
+        webView = findViewById(R.id.webView);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(
-            "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.0"
-        );
 
-        // JavaScript → Android 브릿지
+        // AndroidBridge 등록 (window.Android 로 접근)
         webView.addJavascriptInterface(new AndroidBridge(this), "Android");
+        // AndroidBridge 등록 (window.AndroidBridge 로도 접근 가능)
+        webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                if (url.startsWith("https://eventtv-gpdc5ulb.manus.space")) {
-                    return false; // WebView 내에서 처리
+                if (url.startsWith("https://eventtv-gpdc5ulb.manus.space") ||
+                    url.startsWith("https://3000-")) {
+                    return false;
                 }
-                // 외부 링크는 브라우저로
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                } catch (Exception e) {
-                    android.util.Log.e("EventTV", "URL open error: " + e.getMessage());
-                }
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                startActivity(intent);
                 return true;
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                // 페이지 로드 완료 후 FCM 토큰 재전달 (타이밍 문제 대비)
-                FirebaseMessaging.getInstance().getToken()
-                    .addOnCompleteListener(task -> {
-                        if (task.isSuccessful() && task.getResult() != null) {
-                            String fcmToken = task.getResult();
-                            view.post(() ->
-                                view.evaluateJavascript(
-                                    "window.fcmToken = '" + fcmToken + "'; " +
-                                    "window.__fcmToken = '" + fcmToken + "'; " +
-                                    "if (window.onFcmToken) window.onFcmToken('" + fcmToken + "');",
-                                    null
-                                )
-                            );
-                        }
-                    });
             }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
+                                             FileChooserParams fileChooserParams) {
+                MainActivity.this.filePathCallback = filePathCallback;
+                Intent intent = fileChooserParams.createIntent();
+                fileChooserLauncher.launch(intent);
+                return true;
+            }
+
+            @Override
             public void onPermissionRequest(PermissionRequest request) {
                 request.grant(request.getResources());
             }
+        });
 
-            // ── 파일 선택 창 처리 (Android 5.0+) ──────────────────────────────
-            @Override
-            public boolean onShowFileChooser(WebView webView,
-                                             ValueCallback<Uri[]> filePathCallback,
-                                             FileChooserParams fileChooserParams) {
-                // 이전 콜백이 남아있으면 취소 처리
-                if (MainActivity.this.filePathCallback != null) {
-                    MainActivity.this.filePathCallback.onReceiveValue(null);
-                }
-                MainActivity.this.filePathCallback = filePathCallback;
-
-                // accept 타입 확인 (이미지 전용 여부)
-                String[] acceptTypes = fileChooserParams.getAcceptTypes();
-                boolean imageOnly = acceptTypes != null && acceptTypes.length == 1
-                    && acceptTypes[0].equals("image/*");
-
-                // 파일 선택 Intent 생성
-                Intent contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                if (imageOnly) {
-                    contentIntent.setType("image/*");
-                } else {
-                    contentIntent.setType("*/*");
-                    // 다중 파일 선택 허용
-                    contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                    // 이미지, 문서, 영상 등 모두 허용
-                    String[] mimeTypes = {
-                        "image/*", "application/pdf",
-                        "application/msword",
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        "application/vnd.ms-excel",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        "application/vnd.ms-powerpoint",
-                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        "application/zip", "video/*", "audio/*", "text/plain"
-                    };
-                    contentIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
-                }
-
-                Intent chooserIntent = Intent.createChooser(contentIntent, "파일 선택");
-                fileChooserLauncher.launch(chooserIntent);
-                return true;
+        // FCM 토큰 갱신
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+            if (task.isSuccessful() && task.getResult() != null) {
+                android.util.Log.d("EventTV", "[FCM] 토큰: " + task.getResult().substring(0, Math.min(20, task.getResult().length())) + "...");
             }
         });
 
-        // FCM 알림으로 앱 실행 시 처리
-        handleIntent(getIntent());
+        createNotificationChannel();
 
-        webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
-
-        // FCM 토큰 가져오기 (webView 초기화 후에 실행)
-        FirebaseMessaging.getInstance().getToken()
-            .addOnCompleteListener(task -> {
-                if (task.isSuccessful() && task.getResult() != null) {
-                    String token = task.getResult();
-                    android.util.Log.d("EventTV", "[FCM] 토큰 획득: " + token.substring(0, Math.min(20, token.length())) + "...");
-                    webView.post(() ->
-                        webView.evaluateJavascript(
-                            "window.fcmToken = '" + token + "'; " +
-                            "window.__fcmToken = '" + token + "'; " +
-                            "if (window.onFcmToken) window.onFcmToken('" + token + "');",
-                            null
-                        )
-                    );
-                } else {
-                    android.util.Log.w("EventTV", "[FCM] 토큰 획득 실패: " + task.getException());
-                }
-            });
+        // 알림 탭으로 진입한 경우 URL 처리
+        String url = "https://eventtv-gpdc5ulb.manus.space/messenger";
+        if (getIntent() != null && getIntent().getStringExtra("url") != null) {
+            url = getIntent().getStringExtra("url");
+        }
+        webView.loadUrl(url);
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        handleIntent(intent);
-    }
-
-    private void handleIntent(Intent intent) {
-        if (intent != null && intent.hasExtra("url")) {
+        if (intent != null && intent.getStringExtra("url") != null) {
             String url = intent.getStringExtra("url");
-            if (webView != null && url != null) {
-                if (!url.startsWith("http")) {
-                    url = "https://eventtv-gpdc5ulb.manus.space" + (url.startsWith("/") ? url : "/" + url);
-                }
-                webView.loadUrl(url);
-            }
+            webView.loadUrl(url);
         }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
-        // 앱 포그라운드 진입 시 알림 취소 안 함 - 실제 메시지를 읽어야만 배지 감소
-        // 소켓으로도 서버에 알림
-        if (webView != null) {
-            webView.post(() ->
-                webView.evaluateJavascript(
-                    "window._androidIsInForeground = true; " +
-                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
-                    "  window._messengerSocket.emit('app_foreground'); " +
-                    "}",
-                    null
-                )
-            );
-        }
+        // 앱 포그라운드 복귀 시 JS에 알림
+        webView.post(() -> webView.evaluateJavascript(
+            "if(window.onAppForeground) window.onAppForeground();", null));
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        // 정적 변수로 백그라운드 상태 설정
         isInForeground = false;
-        // 소켓으로도 서버에 알림
-        if (webView != null) {
-            webView.post(() ->
-                webView.evaluateJavascript(
-                    "window._androidIsInForeground = false; " +
-                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
-                    "  window._messengerSocket.emit('app_background'); " +
-                    "}",
-                    null
-                )
-            );
-        }
-        // 백그라운드 전환 시 별도 배지 알림 발행 안 함
-        // FCM 알림의 setNumber(badgeCount) + 고정 ID(BADGE_NOTIFICATION_ID)가 배지 역할 담당
-        // 사일런트 알림 방식은 FCM 알림과 충돌하여 배지가 나타났다 사라지는 문제 발생
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (webView != null) {
-            // JS에 androidBack 커스텀 이벤트를 먼저 전달
-            webView.evaluateJavascript(
-                "(function() {" +
-                "  var e = new CustomEvent('androidBack', { cancelable: true });" +
-                "  var handled = !window.dispatchEvent(e);" +
-                "  return handled ? 'handled' : 'nothandled';" +
-                "})()",
-                value -> {
-                    if (value == null || !value.contains("handled")) {
-                        runOnUiThread(() -> {
-                            if (webView.canGoBack()) {
-                                webView.goBack();
-                            } else {
-                                MainActivity.super.onBackPressed();
-                            }
-                        });
-                    }
-                }
-            );
-        } else {
-            super.onBackPressed();
-        }
+        // 앱 백그라운드 전환 시 JS에 알림
+        webView.post(() -> webView.evaluateJavascript(
+            "if(window.onAppBackground) window.onAppBackground();", null));
     }
 
     private void createNotificationChannel() {
@@ -298,13 +156,10 @@ public class MainActivity extends AppCompatActivity {
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager == null) return;
 
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .build();
+            // v5 채널: 소리 null - MediaPlayer가 볼륨 제어하여 소리 재생
+            // (Android 8+에서 채널 소리는 앱 코드로 볼륨 조절 불가 → MediaPlayer 방식으로 전환)
 
-            // ── 진동 없음 채널 ──────────────────────────────────────────────────
+            // ── 진동 없음 채널 (v5) ──────────────────────────────────────────────
             NotificationChannel chVibOff = new NotificationChannel(
                 CHANNEL_VIB_OFF, "EventTV 메시지 (진동 없음)", NotificationManager.IMPORTANCE_HIGH);
             chVibOff.setDescription("EventTV 메신저 알림 - 진동 없음");
@@ -312,10 +167,10 @@ public class MainActivity extends AppCompatActivity {
             chVibOff.enableVibration(false);
             chVibOff.enableLights(true);
             chVibOff.setLightColor(0xFF00FF00);
-            chVibOff.setSound(soundUri, audioAttributes);
+            chVibOff.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
             manager.createNotificationChannel(chVibOff);
 
-            // ── 짧게 (300ms) 채널 ──────────────────────────────────────────────
+            // ── 짧게 (300ms) 채널 (v5) ──────────────────────────────────────────
             NotificationChannel chVibShort = new NotificationChannel(
                 CHANNEL_VIB_SHORT, "EventTV 메시지 (짧은 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibShort.setDescription("EventTV 메신저 알림 - 짧은 진동 300ms");
@@ -324,10 +179,10 @@ public class MainActivity extends AppCompatActivity {
             chVibShort.setVibrationPattern(new long[]{0, 300, 100, 300, 100, 300});
             chVibShort.enableLights(true);
             chVibShort.setLightColor(0xFF00FF00);
-            chVibShort.setSound(soundUri, audioAttributes);
+            chVibShort.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
             manager.createNotificationChannel(chVibShort);
 
-            // ── 기본 (700ms) 채널 ──────────────────────────────────────────────
+            // ── 기본 (700ms) 채널 (v5) ──────────────────────────────────────────
             NotificationChannel chVibDefault = new NotificationChannel(
                 CHANNEL_VIB_DEFAULT, "EventTV 메시지 (기본 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibDefault.setDescription("EventTV 메신저 알림 - 기본 진동 700ms");
@@ -336,10 +191,10 @@ public class MainActivity extends AppCompatActivity {
             chVibDefault.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
             chVibDefault.enableLights(true);
             chVibDefault.setLightColor(0xFF00FF00);
-            chVibDefault.setSound(soundUri, audioAttributes);
+            chVibDefault.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
             manager.createNotificationChannel(chVibDefault);
 
-            // ── 길게 (1500ms) 채널 ─────────────────────────────────────────────
+            // ── 길게 (1500ms) 채널 (v5) ─────────────────────────────────────────
             NotificationChannel chVibLong = new NotificationChannel(
                 CHANNEL_VIB_LONG, "EventTV 메시지 (긴 진동)", NotificationManager.IMPORTANCE_HIGH);
             chVibLong.setDescription("EventTV 메신저 알림 - 긴 진동 1500ms");
@@ -348,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
             chVibLong.setVibrationPattern(new long[]{0, 1500, 300, 1500, 300, 1500});
             chVibLong.enableLights(true);
             chVibLong.setLightColor(0xFF00FF00);
-            chVibLong.setSound(soundUri, audioAttributes);
+            chVibLong.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
             manager.createNotificationChannel(chVibLong);
 
             // ── 포그라운드 알림 채널 (낮은 우선순위 - 소리/진동 없음) ──────────
@@ -368,10 +223,8 @@ public class MainActivity extends AppCompatActivity {
             legacyChannel.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
             legacyChannel.enableLights(true);
             legacyChannel.setLightColor(0xFF00FF00);
-            legacyChannel.setSound(soundUri, audioAttributes);
+            legacyChannel.setSound(null, null); // 소리 없음 - MediaPlayer가 담당
             manager.createNotificationChannel(legacyChannel);
-
-            // 배지 전용 사일런트 채널 제거됨 - FCM 알림이 배지 역할 담당
         }
     }
 }

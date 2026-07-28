@@ -4,6 +4,8 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
@@ -121,19 +123,22 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
         float volumeFloat = volumePct / 100.0f;
 
-        // 알림음 재생 (RingtoneManager 방식 - Android 8+ 안정적)
-        // 주의: Android 8.0+ 에서는 알림 채널에 설정된 소리가 우선 적용됨
-        // 아래 Ringtone 재생은 Android 7 이하 또는 채널 소리 무시되는 경우 보완용
-        if (soundEnabled && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        // 알림음 재생 - MediaPlayer 방식으로 볼륨 직접 적용
+        // Android 8.0+에서는 NotificationChannel 소리가 우선이므로
+        // 채널 소리를 null로 설정하고 MediaPlayer로 직접 재생하여 볼륨 제어
+        if (soundEnabled) {
             try {
                 Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
                 if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
                 if (soundUri != null) {
-                    android.media.Ringtone ringtone = RingtoneManager.getRingtone(getApplicationContext(), soundUri);
-                    if (ringtone != null) {
-                        ringtone.play();
-                        android.util.Log.d("EventTV", "알림음 재생 (Ringtone)");
-                    }
+                    MediaPlayer mp = new MediaPlayer();
+                    mp.setAudioStreamType(AudioManager.STREAM_NOTIFICATION);
+                    mp.setDataSource(getApplicationContext(), soundUri);
+                    mp.setVolume(volumeFloat, volumeFloat);
+                    mp.setOnPreparedListener(MediaPlayer::start);
+                    mp.setOnCompletionListener(MediaPlayer::release);
+                    mp.prepareAsync();
+                    android.util.Log.d("EventTV", "알림음 재생 (MediaPlayer) 볼륨: " + volumePct + "%");
                 }
             } catch (Exception e) {
                 android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
@@ -149,7 +154,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             : PendingIntent.FLAG_ONE_SHOT;
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 
-        Uri notifSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        // 소리는 MediaPlayer가 직접 재생하므로 알림 빌더에서는 소리 비활성화
+        // (Android 8+에서 채널 소리와 MediaPlayer가 중복 재생되는 문제 방지)
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, selectedChannelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -158,7 +164,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(badgeCount)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-            .setSound(notifSoundUri)       // 소리 명시적 설정 (Android 7 이하 보완)
+            .setSound(null)                // 소리 비활성화 - MediaPlayer가 볼륨 제어하여 재생
             .setContentIntent(pendingIntent);
 
         // 팝업 알림 ID: channelId 기반으로 고정 → 같은 채널의 새 메시지는 이전 알림을 덮어씀
