@@ -17,6 +17,7 @@ import android.os.Vibrator;
 import androidx.core.app.NotificationCompat;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
+import me.leolin.shortcutbadger.ShortcutBadger;
 import org.json.JSONObject;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -63,6 +64,19 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null) return;
+
+        // ── 0단계: ShortcutBadger로 런처 아이콘 배지 직접 갱신 ─────────────────
+        // FCM 수신 즉시 런처 배지 숫자 업데이트 (앱 종료/백그라운드 모두 동작)
+        try {
+            if (badgeCount > 0) {
+                ShortcutBadger.applyCount(this, badgeCount);
+            } else {
+                ShortcutBadger.removeCount(this);
+            }
+            android.util.Log.d("EventTV", "[배지] ShortcutBadger 업데이트: " + badgeCount);
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "[배지] ShortcutBadger 오류: " + e.getMessage());
+        }
 
         // ── 1단계: 배지 전용 알림 업데이트 ──────────────────────────────────────
         // BADGE_NOTIFICATION_ID(99999)는 배지 숫자만 표시하는 사일런트 알림
