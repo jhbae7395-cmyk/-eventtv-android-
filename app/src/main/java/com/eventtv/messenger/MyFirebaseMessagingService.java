@@ -149,7 +149,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(false)           // 메시지를 읽기 전까지 알림 유지
-            .setOngoing(false)               // 스와이프로 제거 가능
+            .setOngoing(true)               // 지속 알림: 앱을 열어도 자동 제거 안 함 → 배지 유지
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(badgeCount)           // 배지 숫자 (안 읽은 메시지 수)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)  // 삼성 One UI 배지 강제 표시

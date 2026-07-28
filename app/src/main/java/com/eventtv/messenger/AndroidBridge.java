@@ -122,12 +122,20 @@ public class AndroidBridge {
     }
 
     /**
-     * 웹 JS에서 배지 제거
+     * 웹 JS에서 배지 제거 - 메시지를 모두 읽었을 때 호출
      */
     @JavascriptInterface
     public void clearBadgeCount() {
         MainActivity.currentUnreadCount = 0;
         android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
+        // FCM 배지 알림도 취소
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            }
+        } catch (Exception ignored) {}
     }
 
     /**

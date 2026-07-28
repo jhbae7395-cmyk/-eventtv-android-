@@ -31,10 +31,11 @@ public class MainActivity extends AppCompatActivity {
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
 
     // 진동별 채널 ID (Android 8.0+ 진동 패턴 제어용)
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off";     // 진동 없음
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short";   // 짧게 300ms
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default"; // 기본 700ms
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long";    // 길게 1500ms
+    // v2: 채널 ID 변경으로 기존 채널 진동 설정 무시 문제 해결
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v2";     // 진동 없음
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v2";   // 짧게 300ms
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v2"; // 기본 700ms
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v2";    // 길게 1500ms
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
@@ -228,19 +229,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
-        // 앱 포그라운드 진입 시 배지 알림(BADGE_NOTIFICATION_ID)을 제외한 FCM 알림 취소
-        // cancelAll()은 배지 알림까지 삭제하여 배지가 사라지므로 사용 금지
-        try {
-            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (nm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                android.service.notification.StatusBarNotification[] active = nm.getActiveNotifications();
-                for (android.service.notification.StatusBarNotification sbn : active) {
-                    if (sbn.getId() != BADGE_NOTIFICATION_ID) {
-                        nm.cancel(sbn.getId());
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
+        // 앱 포그라운드 진입 시 알림 취소 안 함 - 실제 메시지를 읽어야만 배지 감소
         // 소켓으로도 서버에 알림
         if (webView != null) {
             webView.post(() ->
