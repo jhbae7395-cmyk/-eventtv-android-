@@ -32,10 +32,10 @@ public class MainActivity extends AppCompatActivity {
 
     // 진동별 채널 ID (Android 8.0+ 진동 패턴 제어용)
     // v2: 채널 ID 변경으로 기존 채널 진동 설정 무시 문제 해결
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v2";     // 진동 없음
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v2";   // 짧게 300ms
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v2"; // 기본 700ms
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v2";    // 길게 1500ms
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v3";     // 진동 없음
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v3";   // 짧게 300ms
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v3"; // 기본 700ms
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v3";    // 길게 1500ms
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;

@@ -4,14 +4,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.media.AudioAttributes;
-import android.media.AudioManager;
-import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import androidx.core.app.NotificationCompat;
@@ -158,36 +153,20 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
         float volumeFloat = volumePct / 100.0f;
 
-        // 알림음 재생 (MediaPlayer 방식 - 설정된 볼륨 적용)
-        if (soundEnabled) {
+        // 알림음 재생 (RingtoneManager 방식 - Android 8+ 안정적)
+        // 주의: Android 8.0+ 에서는 알림 채널에 설정된 소리가 우선 적용됨
+        // 아래 Ringtone 재생은 Android 7 이하 또는 채널 소리 무시되는 경우 보완용
+        if (soundEnabled && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
-                AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-                if (audioManager != null) {
-                    int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
-                    int targetVol = (int) Math.round(maxVol * volumeFloat);
-                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, targetVol, 0);
-                }
                 Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
                 if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-
-                final MediaPlayer mediaPlayer = new MediaPlayer();
-                mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build());
-                mediaPlayer.setDataSource(getApplicationContext(), soundUri);
-                mediaPlayer.setLooping(false);
-                mediaPlayer.setVolume(volumeFloat, volumeFloat);
-                mediaPlayer.prepare();
-                mediaPlayer.start();
-
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    try {
-                        if (mediaPlayer.isPlaying()) mediaPlayer.stop();
-                        mediaPlayer.release();
-                    } catch (Exception ignored) {}
-                }, 1000L);
+                if (soundUri != null) {
+                    android.media.Ringtone ringtone = RingtoneManager.getRingtone(getApplicationContext(), soundUri);
+                    if (ringtone != null) {
+                        ringtone.play();
+                        android.util.Log.d("EventTV", "알림음 재생 (Ringtone)");
+                    }
+                }
             } catch (Exception e) {
                 android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
             }
@@ -202,6 +181,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             : PendingIntent.FLAG_ONE_SHOT;
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 
+        Uri notifSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, selectedChannelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -210,6 +190,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(badgeCount)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+            .setSound(notifSoundUri)       // 소리 명시적 설정 (Android 7 이하 보완)
             .setContentIntent(pendingIntent);
 
         // 팝업 알림은 고유한 ID(시간 기반)로 발행 → BADGE_NOTIFICATION_ID와 충돌 없음
