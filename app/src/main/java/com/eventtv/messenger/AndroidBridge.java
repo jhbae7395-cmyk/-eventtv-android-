@@ -128,12 +128,32 @@ public class AndroidBridge {
     public void clearBadgeCount() {
         MainActivity.currentUnreadCount = 0;
         android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
+        // ShortcutBadger로 아이콘 배지 0으로 초기화
+        try {
+            me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
+        } catch (Exception ignored) {}
         // FCM 배지 알림도 취소
         try {
             android.app.NotificationManager nm = (android.app.NotificationManager)
                 context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             if (nm != null) {
                 nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * 소켓 badge_sync 이벤트로 배지 직접 설정
+     */
+    @JavascriptInterface
+    public void setBadgeCount(int count) {
+        MainActivity.currentUnreadCount = count;
+        android.util.Log.d("EventTV", "[배지] setBadgeCount: " + count);
+        try {
+            if (count > 0) {
+                me.leolin.shortcutbadger.ShortcutBadger.applyCount(context, count);
+            } else {
+                me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
             }
         } catch (Exception ignored) {}
     }
@@ -170,7 +190,14 @@ public class AndroidBridge {
                         .getInt("total");
                     android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
                     MainActivity.currentUnreadCount = total;
-                    // 사일런트 알림 발행 안 함 - FCM 알림이 배지 역할 담당
+                    // ShortcutBadger로 아이콘 배지 즉시 갱신
+                    try {
+                        if (total > 0) {
+                            me.leolin.shortcutbadger.ShortcutBadger.applyCount(context, total);
+                        } else {
+                            me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
+                        }
+                    } catch (Exception ignored) {}
                 }
                 conn.disconnect();
             } catch (Exception e) {
