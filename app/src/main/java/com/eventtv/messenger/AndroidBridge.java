@@ -13,6 +13,9 @@ public class AndroidBridge {
     private final Context context;
     static final String PREFS_NAME = "eventtv_prefs";
     static final String KEY_EMPLOYEE_ID = "employee_id";  // employeeId 저장 (숫자)
+    static final String KEY_NOTIFICATION_SOUND = "notification_sound";  // 알림 소리 켜기/끄기
+    static final String KEY_NOTIFICATION_VOLUME = "notification_volume"; // 알림 볼륨 0~100
+    static final String KEY_VIBRATION_DURATION = "vibration_duration"; // 진동 시간 ms (0=진동 끄기)
 
     public AndroidBridge(Context context) {
         this.context = context;
@@ -34,6 +37,69 @@ public class AndroidBridge {
     @JavascriptInterface
     public void log(String message) {
         android.util.Log.d("EventTV", message);
+    }
+
+    /**
+     * 알림 소리 켜기/끄기 설정 반환 (기본값: true)
+     */
+    @JavascriptInterface
+    public boolean getNotificationSound() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getBoolean(KEY_NOTIFICATION_SOUND, true);
+    }
+
+    /**
+     * 알림 소리 켜기/끄기 설정 저장
+     * @param enabled true=소리 켜기, false=소리 끄기
+     */
+    @JavascriptInterface
+    public void setNotificationSound(boolean enabled) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putBoolean(KEY_NOTIFICATION_SOUND, enabled).apply();
+        android.util.Log.d("EventTV", "[설정] 알림 소리: " + (enabled ? "켜기" : "끄기"));
+    }
+
+    /**
+     * 알림 볼륨 반환 (0~100, 기본값: 67)
+     */
+    @JavascriptInterface
+    public int getNotificationVolume() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getInt(KEY_NOTIFICATION_VOLUME, 67);
+    }
+
+    /**
+     * 알림 볼륨 저장 (0~100)
+     * @param volume 볼륨 값 (0=무음, 100=최대)
+     */
+    @JavascriptInterface
+    public void setNotificationVolume(int volume) {
+        if (volume < 0) volume = 0;
+        if (volume > 100) volume = 100;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putInt(KEY_NOTIFICATION_VOLUME, volume).apply();
+        android.util.Log.d("EventTV", "[설정] 알림 볼륨: " + volume);
+    }
+
+    /**
+     * 진동 시간 반환 (ms, 0=진동 끄기, 기본값: 700)
+     */
+    @JavascriptInterface
+    public int getVibrationDuration() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return prefs.getInt(KEY_VIBRATION_DURATION, 700);
+    }
+
+    /**
+     * 진동 시간 저장 (ms)
+     * @param durationMs 0=진동 끄기, 300=짧게, 700=기본, 1500=길게
+     */
+    @JavascriptInterface
+    public void setVibrationDuration(int durationMs) {
+        if (durationMs < 0) durationMs = 0;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putInt(KEY_VIBRATION_DURATION, durationMs).apply();
+        android.util.Log.d("EventTV", "[설정] 진동 시간: " + durationMs + "ms");
     }
 
     /**

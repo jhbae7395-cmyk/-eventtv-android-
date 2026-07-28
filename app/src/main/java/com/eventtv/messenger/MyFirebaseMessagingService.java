@@ -69,56 +69,66 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             return;
         }
 
-        // 강한 진동 패턴 (v1.4.2와 동일)
-        long[] vibrationPattern = {0, 700, 200, 700, 200, 700, 200, 700, 200, 700, 200, 700};
-        Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
-        if (vibrator != null && vibrator.hasVibrator()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                int[] amplitudes = {0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255};
-                vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, amplitudes, -1));
-            } else {
-                vibrator.vibrate(vibrationPattern, -1);
+        // 진동 시간 설정 확인 (SharedPreferences)
+        SharedPreferences vibPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        int vibDurationMs = vibPrefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
+
+        // 진동 (0이면 진동 끄기)
+        if (vibDurationMs > 0) {
+            // 설정된 시간으로 진동 패턴 동적 생성 (on-off 반복 3회)
+            long vd = vibDurationMs;
+            long gap = Math.max(100, vd / 3);
+            long[] vibrationPattern = {0, vd, gap, vd, gap, vd};
+            Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    int[] amplitudes = {0, 255, 0, 255, 0, 255};
+                    vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, amplitudes, -1));
+                } else {
+                    vibrator.vibrate(vibrationPattern, -1);
+                }
             }
         }
 
-        // 알림음 직접 재생 (MediaPlayer 방식 - 볼륨 2/3)
-        try {
-            AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-            if (audioManager != null) {
-                int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
-                // 현재 볼륨의 2/3로 설정 (최대 볼륨 기준)
-                int targetVol = (int) Math.round(maxVol * 2.0 / 3.0);
-                audioManager.setStreamVolume(
-                    AudioManager.STREAM_NOTIFICATION,
-                    targetVol,
-                    0
-                );
+        // 알림 소리 설정 확인 (SharedPreferences)
+        SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
+        int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
+        float volumeFloat = volumePct / 100.0f;
+
+        // 알림음 재생 (MediaPlayer 방식 - 설정된 볼륨 적용)
+        if (soundEnabled) {
+            try {
+                AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (audioManager != null) {
+                    int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
+                    int targetVol = (int) Math.round(maxVol * volumeFloat);
+                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, targetVol, 0);
+                }
+                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+
+                final MediaPlayer mediaPlayer = new MediaPlayer();
+                mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+                mediaPlayer.setDataSource(getApplicationContext(), soundUri);
+                mediaPlayer.setLooping(false);
+                mediaPlayer.setVolume(volumeFloat, volumeFloat);
+                mediaPlayer.prepare();
+                mediaPlayer.start();
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        if (mediaPlayer.isPlaying()) mediaPlayer.stop();
+                        mediaPlayer.release();
+                    } catch (Exception ignored) {}
+                }, 1000L);
+            } catch (Exception e) {
+                android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
             }
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-
-            final MediaPlayer mediaPlayer = new MediaPlayer();
-            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build());
-            mediaPlayer.setDataSource(getApplicationContext(), soundUri);
-            mediaPlayer.setLooping(false);
-            // MediaPlayer 자체 볼륨도 0.67로 설정 (좌/우 채널 각각)
-            mediaPlayer.setVolume(0.67f, 0.67f);
-            mediaPlayer.prepare();
-            mediaPlayer.start();
-
-            // 1초 후 정리
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                try {
-                    if (mediaPlayer.isPlaying()) mediaPlayer.stop();
-                    mediaPlayer.release();
-                } catch (Exception ignored) {}
-            }, 1000L);
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
         }
 
         // 알림 표시
