@@ -73,21 +73,31 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         SharedPreferences vibPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         int vibDurationMs = vibPrefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
 
-        // 진동 (0이면 진동 끄기)
-        if (vibDurationMs > 0) {
-            // 설정된 시간으로 진동 패턴 동적 생성 (on-off 반복 3회)
+        // Android 7 이하에서만 직접 진동 (Android 8+는 채널에서 처리)
+        if (vibDurationMs > 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             long vd = vibDurationMs;
             long gap = Math.max(100, vd / 3);
             long[] vibrationPattern = {0, vd, gap, vd, gap, vd};
             Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
             if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    int[] amplitudes = {0, 255, 0, 255, 0, 255};
-                    vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, amplitudes, -1));
-                } else {
-                    vibrator.vibrate(vibrationPattern, -1);
-                }
+                vibrator.vibrate(vibrationPattern, -1);
             }
+        }
+
+        // 진동 설정에 따른 채널 선택 (Android 8.0+)
+        String selectedChannelId;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (vibDurationMs <= 0) {
+                selectedChannelId = MainActivity.CHANNEL_VIB_OFF;
+            } else if (vibDurationMs <= 300) {
+                selectedChannelId = MainActivity.CHANNEL_VIB_SHORT;
+            } else if (vibDurationMs <= 700) {
+                selectedChannelId = MainActivity.CHANNEL_VIB_DEFAULT;
+            } else {
+                selectedChannelId = MainActivity.CHANNEL_VIB_LONG;
+            }
+        } else {
+            selectedChannelId = MainActivity.CHANNEL_ID;
         }
 
         // 알림 소리 설정 확인 (SharedPreferences)
@@ -140,7 +150,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             : PendingIntent.FLAG_ONE_SHOT;
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, MainActivity.CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, selectedChannelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
