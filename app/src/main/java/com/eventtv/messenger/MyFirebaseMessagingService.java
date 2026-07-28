@@ -58,7 +58,34 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             } catch (NumberFormatException ignored) {}
         }
 
-        // 포그라운드 상태이면 알림 표시 안 함 (앱이 열려있을 때)
+        // 배지 알림은 포그라운드/백그라운드 상관없이 항상 업데이트
+        // (포그라운드 체크는 소리/진동/팝업 알림에만 적용)
+        {
+            NotificationManager badgeManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (badgeManager != null) {
+                Intent badgeIntent = new Intent(this, MainActivity.class);
+                badgeIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                int badgeFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                    : PendingIntent.FLAG_UPDATE_CURRENT;
+                PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
+                String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+                NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle("EventTV 메신저")
+                    .setContentText(badgeCount + "개의 안읽은 메시지")
+                    .setAutoCancel(false)
+                    .setOngoing(true)
+                    .setNumber(badgeCount)
+                    .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+                    .setContentIntent(badgePendingIntent);
+                badgeManager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+                badgeManager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
+            }
+        }
+
+        // 포그라운드 상태이면 소리/진동/팝업 알림 표시 안 함
         if (MainActivity.isInForeground) {
             return;
         }
