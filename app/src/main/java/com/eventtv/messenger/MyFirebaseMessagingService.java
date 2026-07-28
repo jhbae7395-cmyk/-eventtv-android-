@@ -1,7 +1,6 @@
 package com.eventtv.messenger;
 
 import android.app.NotificationManager;
-import me.leolin.shortcutbadger.ShortcutBadger;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -58,11 +57,6 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 if (badgeCount < 1) badgeCount = 1;
             } catch (NumberFormatException ignored) {}
         }
-
-        // 배지 숫자 업데이트 (포그라운드/백그라운드 모두 적용)
-        try {
-            ShortcutBadger.applyCount(getApplicationContext(), badgeCount);
-        } catch (Exception ignored) {}
 
         // 포그라운드 상태이면 알림 표시 안 함 (앱이 열려있을 때)
         if (MainActivity.isInForeground) {

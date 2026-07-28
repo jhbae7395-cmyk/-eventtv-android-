@@ -10,7 +10,6 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.webkit.JavascriptInterface;
-import me.leolin.shortcutbadger.ShortcutBadger;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

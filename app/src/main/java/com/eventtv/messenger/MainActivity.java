@@ -39,9 +39,7 @@ public class MainActivity extends AppCompatActivity {
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
 
-    // 배지 전용 사일런트 알림 채널 ID (소리/진동 없이 배지 숫자만 표시)
-    public static final String CHANNEL_BADGE = "eventtv_badge_silent";
-    // 배지 전용 알림 ID (항상 동일한 ID로 업데이트)
+    // FCM 알림 고정 ID (항상 동일한 ID로 업데이트하여 배지 숫자 정확히 표시)
     public static final int BADGE_NOTIFICATION_ID = 99999;
     // 현재 미읽음 수 (JS에서 업데이트)
     public static int currentUnreadCount = 0;
@@ -384,15 +382,7 @@ public class MainActivity extends AppCompatActivity {
             legacyChannel.setSound(soundUri, audioAttributes);
             manager.createNotificationChannel(legacyChannel);
 
-            // ── 배지 전용 사일런트 채널 (소리/진동 없이 배지 숫자만 표시) ────────────────
-            NotificationChannel badgeChannel = new NotificationChannel(
-                CHANNEL_BADGE, "EventTV 미읽음 배지", NotificationManager.IMPORTANCE_MIN);
-            badgeChannel.setDescription("알림 없이 배지 숫자만 표시");
-            badgeChannel.setShowBadge(true);
-            badgeChannel.enableVibration(false);
-            badgeChannel.setSound(null, null);
-            badgeChannel.enableLights(false);
-            manager.createNotificationChannel(badgeChannel);
+            // 배지 전용 사일런트 채널 제거됨 - FCM 알림이 배지 역할 담당
         }
     }
 }
