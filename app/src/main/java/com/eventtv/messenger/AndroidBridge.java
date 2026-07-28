@@ -113,25 +113,13 @@ public class AndroidBridge {
     }
 
     /**
-     * 웹 JS에서 직접 배지 숫자 설정
-     * @param count 배지 숫자
+     * 웹 JS에서 직접 배지 숫자 저장 (참조용)
+     * FCM 알림이 배지 역할 담당하므로 사일런트 알림 발행 안 함
      */
     @JavascriptInterface
     public void applyBadgeCount(int count) {
-        // 현재 미읽음 수 저장 (백그라운드 전환 시 사일런트 알림에 사용)
         MainActivity.currentUnreadCount = count;
         android.util.Log.d("EventTV", "[배지] 미읽음 수 저장: " + count);
-        // 백그라운드 상태이면 즉시 사일런트 알림 업데이트
-        if (!MainActivity.isInForeground) {
-            if (context instanceof MainActivity) {
-                MainActivity activity = (MainActivity) context;
-                if (count > 0) {
-                    activity.showBadgeNotification(count);
-                } else {
-                    activity.clearBadgeNotification();
-                }
-            }
-        }
     }
 
     /**
@@ -140,18 +128,12 @@ public class AndroidBridge {
     @JavascriptInterface
     public void clearBadgeCount() {
         MainActivity.currentUnreadCount = 0;
-        if (!MainActivity.isInForeground) {
-            if (context instanceof MainActivity) {
-                ((MainActivity) context).clearBadgeNotification();
-            }
-        }
         android.util.Log.d("EventTV", "[배지] 제거 (clearBadgeCount)");
     }
 
     /**
-     * 서버에서 전체 미읽음 메시지 수를 조회하여 배지 업데이트
-     * 앱 실행 시 호출하여 배지를 최신 상태로 동기화
-     * @param employeeToken 직원 인증 토큰
+     * 서버에서 전체 미읽음 메시지 수 조회 (미읽음 수 저장용)
+     * 사일런트 알림 발행 안 함 - FCM 알림이 배지 역할 담당
      */
     @JavascriptInterface
     public void updateBadgeFromServer(String employeeToken) {
@@ -172,7 +154,6 @@ public class AndroidBridge {
                     String line;
                     while ((line = reader.readLine()) != null) sb.append(line);
                     reader.close();
-                    // tRPC batch 응답: [{"result":{"data":{"json":{"total":22}}}}]
                     String body = sb.toString();
                     org.json.JSONArray arr = new org.json.JSONArray(body);
                     int total = arr.getJSONObject(0)
@@ -182,16 +163,7 @@ public class AndroidBridge {
                         .getInt("total");
                     android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
                     MainActivity.currentUnreadCount = total;
-                    if (context instanceof MainActivity) {
-                        final int finalTotal = total;
-                        ((MainActivity) context).runOnUiThread(() -> {
-                            if (finalTotal > 0) {
-                                ((MainActivity) context).showBadgeNotification(finalTotal);
-                            } else {
-                                ((MainActivity) context).clearBadgeNotification();
-                            }
-                        });
-                    }
+                    // 사일런트 알림 발행 안 함 - FCM 알림이 배지 역할 담당
                 }
                 conn.disconnect();
             } catch (Exception e) {

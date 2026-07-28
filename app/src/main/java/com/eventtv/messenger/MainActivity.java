@@ -274,56 +274,9 @@ public class MainActivity extends AppCompatActivity {
                 )
             );
         }
-        // 백그라운드 전환 시 미읽음 수가 있으면 배지 전용 사일런트 알림 발행
-        if (currentUnreadCount > 0) {
-            showBadgeNotification(currentUnreadCount);
-        } else {
-            clearBadgeNotification();
-        }
-    }
-
-    /**
-     * 배지 전용 사일런트 알림 발행 (소리/진동 없이 배지 숫자만 표시)
-     */
-    public void showBadgeNotification(int count) {
-        try {
-            android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
-                this, 0,
-                new Intent(this, MainActivity.class),
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                    ? android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
-                    : android.app.PendingIntent.FLAG_UPDATE_CURRENT
-            );
-            androidx.core.app.NotificationCompat.Builder builder =
-                new androidx.core.app.NotificationCompat.Builder(this, CHANNEL_BADGE)
-                    .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle("EventTV 메신저")
-                    .setContentText("미읽음 메시지 " + count + "개")
-                    .setNumber(count)
-                    .setBadgeIconType(androidx.core.app.NotificationCompat.BADGE_ICON_SMALL)
-                    .setContentIntent(pendingIntent)
-                    .setAutoCancel(false)
-                    .setSilent(true)  // 소리/진동 없이 배지만 표시
-                    .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW);
-            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (nm != null) nm.notify(BADGE_NOTIFICATION_ID, builder.build());
-            android.util.Log.d("EventTV", "[배지] 사일런트 알림 발행: " + count);
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[배지] showBadgeNotification 오류: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 배지 알림 제거 (미읽음 0일 때)
-     */
-    public void clearBadgeNotification() {
-        try {
-            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (nm != null) nm.cancel(BADGE_NOTIFICATION_ID);
-            android.util.Log.d("EventTV", "[배지] 사일런트 알림 제거");
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[배지] clearBadgeNotification 오류: " + e.getMessage());
-        }
+        // 백그라운드 전환 시 별도 배지 알림 발행 안 함
+        // FCM 알림의 setNumber(badgeCount) + 고정 ID(BADGE_NOTIFICATION_ID)가 배지 역할 담당
+        // 사일런트 알림 방식은 FCM 알림과 충돌하여 배지가 나타났다 사라지는 문제 발생
     }
 
     @Override
