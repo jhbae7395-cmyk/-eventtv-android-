@@ -4,17 +4,19 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioAttributes;
 import android.media.AudioManager;
-import android.media.Ringtone;
+import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import androidx.core.app.NotificationCompat;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
-import me.leolin.shortcutbadger.ShortcutBadger;
 import org.json.JSONObject;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -25,6 +27,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
     private static final String REGISTER_URL =
         "https://eventtv-gpdc5ulb.manus.space/api/trpc/messenger.registerFcmToken?batch=1";
+
+    // 팝업 알림 ID: 매번 새로운 ID 사용 (System.currentTimeMillis() 기반)
+    // BADGE_NOTIFICATION_ID(99999)는 배지 전용으로만 사용 → 충돌 없음
 
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
@@ -47,7 +52,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         if (remoteMessage.getData().containsKey("url"))
             url = remoteMessage.getData().get("url");
 
-        // 배지 숫자
+        // 배지 숫자 (서버에서 전달한 전체 읽지 않은 메시지 수)
         int badgeCount = 1;
         if (remoteMessage.getData().containsKey("badge")) {
             try {
@@ -59,54 +64,65 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null) return;
 
-        // ── 0단계: ShortcutBadger로 런처 아이콘 배지 갱신 ──────────────────────
-        try {
-            if (badgeCount > 0) {
-                ShortcutBadger.applyCount(this, badgeCount);
-            } else {
-                ShortcutBadger.removeCount(this);
-            }
-            android.util.Log.d("EventTV", "[배지] ShortcutBadger 업데이트: " + badgeCount);
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[배지] ShortcutBadger 오류: " + e.getMessage());
+        // ── 1단계: 배지 전용 알림 업데이트 ──────────────────────────────────────
+        // BADGE_NOTIFICATION_ID(99999)는 배지 숫자만 표시하는 사일런트 알림
+        // 소리/진동 없는 채널(CHANNEL_VIB_OFF) 사용 → 알림 소리/진동 없음
+        // setOngoing(true)로 지속 유지 → 앱 열어도 자동 제거 안 됨
+        // 포그라운드/백그라운드 상관없이 항상 업데이트
+        {
+            Intent badgeIntent = new Intent(this, MainActivity.class);
+            badgeIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int badgeFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+            PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
+
+            // 배지 전용 채널: 소리/진동 없음 (CHANNEL_VIB_OFF)
+            String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+
+            NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("EventTV 메신저")
+                .setContentText(badgeCount + "개의 안읽은 메시지")
+                .setAutoCancel(false)
+                .setOngoing(true)
+                .setNumber(badgeCount)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+                .setSilent(true)          // 소리/진동 완전 억제 (API 26+)
+                .setContentIntent(badgePendingIntent);
+
+            // cancel → notify 순서로 setNumber() 강제 갱신
+            // (setOngoing 알림은 notify()만으로 숫자가 갱신 안 되는 Android 제약)
+            manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
         }
 
-        // ── 1단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
+        // ── 2단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
         if (MainActivity.isInForeground) {
-            android.util.Log.d("EventTV", "[FCM] 포그라운드 상태 - 팝업/소리/진동 생략");
             return;
         }
 
-        // ── 2단계: 설정 읽기 ─────────────────────────────────────────────────────
-        SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
-        boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
-        int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
-        int vibDurationMs = prefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
+        // ── 3단계: 백그라운드일 때만 팝업 알림 발행 ─────────────────────────────
+        // 팝업 알림은 배지 알림과 완전히 다른 ID 사용 (System.currentTimeMillis())
+        // → BADGE_NOTIFICATION_ID와 충돌 없음 → 배지 깜빡임 없음
 
-        // ── 3단계: 소리 직접 재생 (Ringtone + AudioManager 볼륨 제어) ────────────
-        // Ringtone은 백그라운드 Service에서 안정적으로 동작
-        // AudioManager로 볼륨 임시 변경 → 재생 → 원래 볼륨 복원
-        if (soundEnabled && volumePct > 0) {
-            playNotificationSound(volumePct);
-        }
+        // 진동 시간 설정 확인 (SharedPreferences)
+        SharedPreferences vibPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        int vibDurationMs = vibPrefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
 
-        // ── 4단계: 진동 직접 처리 ────────────────────────────────────────────────
-        if (vibDurationMs > 0) {
+        // Android 7 이하에서만 직접 진동 (Android 8+는 채널에서 처리)
+        if (vibDurationMs > 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             long vd = vibDurationMs;
             long gap = Math.max(100, vd / 3);
             long[] vibrationPattern = {0, vd, gap, vd, gap, vd};
             Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
             if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, -1));
-                } else {
-                    vibrator.vibrate(vibrationPattern, -1);
-                }
-                android.util.Log.d("EventTV", "[진동] 재생: " + vibDurationMs + "ms");
+                vibrator.vibrate(vibrationPattern, -1);
             }
         }
 
-        // ── 5단계: 채널 선택 (Android 8.0+) ─────────────────────────────────────
+        // 진동 설정에 따른 채널 선택 (Android 8.0+)
         String selectedChannelId;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (vibDurationMs <= 0) {
@@ -122,7 +138,48 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             selectedChannelId = MainActivity.CHANNEL_ID;
         }
 
-        // ── 6단계: 팝업 알림 발행 (소리/진동은 위에서 직접 처리) ─────────────────
+        // 알림 소리 설정 확인 (SharedPreferences)
+        SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
+        int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67); // 0~100
+        float volumeFloat = volumePct / 100.0f;
+
+        // 알림음 재생 (MediaPlayer 방식 - 설정된 볼륨 적용)
+        if (soundEnabled) {
+            try {
+                AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (audioManager != null) {
+                    int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION);
+                    int targetVol = (int) Math.round(maxVol * volumeFloat);
+                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, targetVol, 0);
+                }
+                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+
+                final MediaPlayer mediaPlayer = new MediaPlayer();
+                mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+                mediaPlayer.setDataSource(getApplicationContext(), soundUri);
+                mediaPlayer.setLooping(false);
+                mediaPlayer.setVolume(volumeFloat, volumeFloat);
+                mediaPlayer.prepare();
+                mediaPlayer.start();
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        if (mediaPlayer.isPlaying()) mediaPlayer.stop();
+                        mediaPlayer.release();
+                    } catch (Exception ignored) {}
+                }, 1000L);
+            } catch (Exception e) {
+                android.util.Log.e("EventTV", "알림음 재생 오류: " + e.getMessage());
+            }
+        }
+
+        // 팝업 알림 발행 (배지 알림과 다른 ID 사용)
         Intent intent = new Intent(this, MainActivity.class);
         intent.putExtra("url", url);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -135,73 +192,15 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
-            .setAutoCancel(true)
+            .setAutoCancel(true)           // 탭하면 팝업 알림 자동 제거 (배지 알림은 별도 유지)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(badgeCount)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-            .setSound(null)       // 소리는 Ringtone이 직접 재생
-            .setVibrate(null)     // 진동은 Vibrator가 직접 처리
             .setContentIntent(pendingIntent);
 
-        int channelIdInt = 0;
-        if (remoteMessage.getData().containsKey("channelId")) {
-            try {
-                channelIdInt = Integer.parseInt(remoteMessage.getData().get("channelId"));
-            } catch (NumberFormatException ignored) {}
-        }
-        int popupNotificationId = channelIdInt > 0 ? channelIdInt : (int) (System.currentTimeMillis() % 100000);
+        // 팝업 알림은 고유한 ID(시간 기반)로 발행 → BADGE_NOTIFICATION_ID와 충돌 없음
+        int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
         manager.notify(popupNotificationId, builder.build());
-        android.util.Log.d("EventTV", "[FCM] 팝업 알림 발행 완료 - id:" + popupNotificationId);
-    }
-
-    /**
-     * Ringtone + AudioManager 볼륨 제어로 알림음 재생
-     * - AudioManager로 알림 볼륨을 사용자 설정값으로 임시 변경
-     * - Ringtone.play()로 재생 (백그라운드 Service에서 안정적)
-     * - Android 9(P)+에서는 Ringtone.setVolume()으로 직접 볼륨 설정 가능
-     */
-    private void playNotificationSound(int volumePct) {
-        try {
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            Ringtone ringtone = RingtoneManager.getRingtone(this, soundUri);
-            if (ringtone == null) {
-                android.util.Log.e("EventTV", "[소리] Ringtone null - 재생 불가");
-                return;
-            }
-
-            float vol = Math.max(0f, Math.min(1f, volumePct / 100.0f));
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                // Android 9+: Ringtone.setVolume()으로 직접 볼륨 설정
-                ringtone.setVolume(vol);
-                ringtone.play();
-                android.util.Log.d("EventTV", "[소리] Ringtone.setVolume(" + vol + ") 재생");
-            } else {
-                // Android 8 이하: AudioManager로 시스템 알림 볼륨 임시 변경 후 재생
-                AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-                int maxVol = audioManager != null ? audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION) : 7;
-                int originalVol = audioManager != null ? audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION) : maxVol;
-                int targetVol = Math.round(vol * maxVol);
-
-                if (audioManager != null) {
-                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, targetVol, 0);
-                }
-                ringtone.play();
-                android.util.Log.d("EventTV", "[소리] AudioManager 볼륨 " + targetVol + "/" + maxVol + " 재생");
-
-                // 재생 후 원래 볼륨 복원 (3초 후)
-                final AudioManager am = audioManager;
-                final int origVol = originalVol;
-                new Thread(() -> {
-                    try { Thread.sleep(3000); } catch (InterruptedException ignored) {}
-                    if (am != null) {
-                        am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, origVol, 0);
-                    }
-                }).start();
-            }
-        } catch (Exception e) {
-            android.util.Log.e("EventTV", "[소리] 재생 오류: " + e.getMessage());
-        }
     }
 
     @Override
