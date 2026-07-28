@@ -28,6 +28,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
     private static final String REGISTER_URL =
         "https://eventtv-gpdc5ulb.manus.space/api/trpc/messenger.registerFcmToken?batch=1";
 
+    // 팝업 알림 ID: 매번 새로운 ID 사용 (System.currentTimeMillis() 기반)
+    // BADGE_NOTIFICATION_ID(99999)는 배지 전용으로만 사용 → 충돌 없음
+
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
@@ -58,37 +61,51 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             } catch (NumberFormatException ignored) {}
         }
 
-        // 배지 알림은 포그라운드/백그라운드 상관없이 항상 업데이트
-        // (포그라운드 체크는 소리/진동/팝업 알림에만 적용)
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) return;
+
+        // ── 1단계: 배지 전용 알림 업데이트 ──────────────────────────────────────
+        // BADGE_NOTIFICATION_ID(99999)는 배지 숫자만 표시하는 사일런트 알림
+        // 소리/진동 없는 채널(CHANNEL_VIB_OFF) 사용 → 알림 소리/진동 없음
+        // setOngoing(true)로 지속 유지 → 앱 열어도 자동 제거 안 됨
+        // 포그라운드/백그라운드 상관없이 항상 업데이트
         {
-            NotificationManager badgeManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (badgeManager != null) {
-                Intent badgeIntent = new Intent(this, MainActivity.class);
-                badgeIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                int badgeFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                    ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-                    : PendingIntent.FLAG_UPDATE_CURRENT;
-                PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
-                String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                    ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
-                NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
-                    .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle("EventTV 메신저")
-                    .setContentText(badgeCount + "개의 안읽은 메시지")
-                    .setAutoCancel(false)
-                    .setOngoing(true)
-                    .setNumber(badgeCount)
-                    .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-                    .setContentIntent(badgePendingIntent);
-                badgeManager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
-                badgeManager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
-            }
+            Intent badgeIntent = new Intent(this, MainActivity.class);
+            badgeIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int badgeFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+            PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
+
+            // 배지 전용 채널: 소리/진동 없음 (CHANNEL_VIB_OFF)
+            String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+
+            NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("EventTV 메신저")
+                .setContentText(badgeCount + "개의 안읽은 메시지")
+                .setAutoCancel(false)
+                .setOngoing(true)
+                .setNumber(badgeCount)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+                .setSilent(true)          // 소리/진동 완전 억제 (API 26+)
+                .setContentIntent(badgePendingIntent);
+
+            // cancel → notify 순서로 setNumber() 강제 갱신
+            // (setOngoing 알림은 notify()만으로 숫자가 갱신 안 되는 Android 제약)
+            manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
         }
 
-        // 포그라운드 상태이면 소리/진동/팝업 알림 표시 안 함
+        // ── 2단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
         if (MainActivity.isInForeground) {
             return;
         }
+
+        // ── 3단계: 백그라운드일 때만 팝업 알림 발행 ─────────────────────────────
+        // 팝업 알림은 배지 알림과 완전히 다른 ID 사용 (System.currentTimeMillis())
+        // → BADGE_NOTIFICATION_ID와 충돌 없음 → 배지 깜빡임 없음
 
         // 진동 시간 설정 확인 (SharedPreferences)
         SharedPreferences vibPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
@@ -162,7 +179,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             }
         }
 
-        // 알림 표시
+        // 팝업 알림 발행 (배지 알림과 다른 ID 사용)
         Intent intent = new Intent(this, MainActivity.class);
         intent.putExtra("url", url);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -175,20 +192,15 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
-            .setAutoCancel(false)           // 메시지를 읽기 전까지 알림 유지
-            .setOngoing(true)               // 지속 알림: 앱을 열어도 자동 제거 안 함 → 배지 유지
+            .setAutoCancel(true)           // 탭하면 팝업 알림 자동 제거 (배지 알림은 별도 유지)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setNumber(badgeCount)           // 배지 숫자 (안 읽은 메시지 수)
-            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)  // 삼성 One UI 배지 강제 표시
+            .setNumber(badgeCount)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
             .setContentIntent(pendingIntent);
 
-        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (manager != null) {
-            // 기존 알림 취소 후 재발행: setOngoing(true) 알림은 notify()만으로 setNumber()가 갱신 안 됨
-            // cancel → notify 순서로 배지 숫자를 강제 갱신
-            manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
-            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, builder.build());
-        }
+        // 팝업 알림은 고유한 ID(시간 기반)로 발행 → BADGE_NOTIFICATION_ID와 충돌 없음
+        int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
+        manager.notify(popupNotificationId, builder.build());
     }
 
     @Override
