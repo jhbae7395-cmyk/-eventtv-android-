@@ -134,10 +134,11 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
-            .setAutoCancel(true)
+            .setAutoCancel(false)           // 메시지를 읽기 전까지 알림 유지
+            .setOngoing(false)               // 스와이프로 제거 가능
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setTimeoutAfter(5000L)
-            .setNumber(badgeCount)  // 앱 아이콘 배지 숫자 (실제 읽지 않은 메시지 수)
+            .setNumber(badgeCount)           // 배지 숫자 (안 읽은 메시지 수)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)  // 삼성 One UI 배지 강제 표시
             .setContentIntent(pendingIntent);
 
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);

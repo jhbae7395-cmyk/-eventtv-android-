@@ -216,7 +216,11 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
-        // 앱 포그라운드 진입 시 배지 초기화
+        // 앱 포그라운드 진입 시 모든 알림 취소 + 배지 초기화
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancelAll();  // 모든 알림 제거
+        } catch (Exception ignored) {}
         try {
             ShortcutBadger.removeCount(getApplicationContext());
         } catch (Exception ignored) {}
@@ -289,6 +293,7 @@ public class MainActivity extends AppCompatActivity {
                 NotificationManager.IMPORTANCE_HIGH
             );
             channel.setDescription("EventTV 메신저 알림");
+            channel.setShowBadge(true);  // 배지 표시 활성화
             channel.enableVibration(true);
             channel.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700, 200, 700, 200, 700, 200, 700});
             channel.enableLights(true);
