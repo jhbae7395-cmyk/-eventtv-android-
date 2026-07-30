@@ -143,17 +143,51 @@ public class AndroidBridge {
     }
 
     /**
-     * 소켓 badge_sync 이벤트로 배지 직접 설정
+     * 소켓 badge_sync / totalUnread 변경 시 호출 - 앱 내부 미읽음 수와 홈 화면 배지 항상 동일하게 유지
      */
     @JavascriptInterface
     public void setBadgeCount(int count) {
         MainActivity.currentUnreadCount = count;
         android.util.Log.d("EventTV", "[배지] setBadgeCount: " + count);
+        // 1) ShortcutBadger: 일부 런처에서 직접 배지 표시
         try {
             if (count > 0) {
                 me.leolin.shortcutbadger.ShortcutBadger.applyCount(context, count);
             } else {
                 me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
+            }
+        } catch (Exception ignored) {}
+        // 2) 삼성 One UI 등 알림 기반 배지 런처 대응: 배지 전용 알림 갱신
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (count <= 0) {
+                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            } else {
+                android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
+                    context, 1,
+                    new android.content.Intent(context, MainActivity.class)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M
+                        ? android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
+                        : android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                );
+                String channelId = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+                    ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+                androidx.core.app.NotificationCompat.Builder builder =
+                    new androidx.core.app.NotificationCompat.Builder(context, channelId)
+                        .setSmallIcon(R.drawable.ic_notification)
+                        .setContentTitle("EventTV 메신저")
+                        .setContentText(count + "개의 안읽은 메시지")
+                        .setNumber(count)
+                        .setBadgeIconType(androidx.core.app.NotificationCompat.BADGE_ICON_SMALL)
+                        .setAutoCancel(false)
+                        .setOngoing(true)
+                        .setSilent(true)
+                        .setContentIntent(pi);
+                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+                nm.notify(MainActivity.BADGE_NOTIFICATION_ID, builder.build());
             }
         } catch (Exception ignored) {}
     }
