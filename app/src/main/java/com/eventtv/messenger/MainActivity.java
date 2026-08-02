@@ -241,13 +241,27 @@ public class MainActivity extends AppCompatActivity {
             me.leolin.shortcutbadger.ShortcutBadger.removeCount(this);
         } catch (Exception ignored) {}
         // 소켓으로 포그라운드 상태 서버에 알림 (badge_sync 이벤트 수신용)
+        // 현재 열린 채널 정보 포함 → 서버가 먼저 읽음 처리 후 badge_sync 발송 (race condition 방지)
         if (webView != null) {
             webView.post(() ->
                 webView.evaluateJavascript(
-                    "window._androidIsInForeground = true; " +
-                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
-                    "  window._messengerSocket.emit('app_foreground'); " +
-                    "}",
+                    "(function() { " +
+                    "  window._androidIsInForeground = true; " +
+                    "  if (!window._messengerSocket || !window._messengerSocket.connected) return; " +
+                    "  var _chId = window._activeChannelId || null; " +
+                    "  var _lastMsgId = null; " +
+                    "  if (_chId && window._trpcUtils) { " +
+                    "    try { " +
+                    "      var _chs = window._trpcUtils.messenger.getMyChannels.getData(window._trpcTokenArg); " +
+                    "      if (_chs) { " +
+                    "        var _ch = _chs.find(function(c) { return c.id === _chId; }); " +
+                    "        if (_ch && _ch.lastMessage) _lastMsgId = _ch.lastMessage.id; " +
+                    "      } " +
+                    "    } catch(e) {} " +
+                    "  } " +
+                    "  var _payload = (_chId && _lastMsgId) ? { currentChannelId: _chId, lastMessageId: _lastMsgId } : undefined; " +
+                    "  window._messengerSocket.emit('app_foreground', _payload); " +
+                    "})()",
                     null
                 )
             );
