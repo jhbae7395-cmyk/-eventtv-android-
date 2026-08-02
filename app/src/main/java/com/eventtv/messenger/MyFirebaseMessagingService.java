@@ -1,7 +1,7 @@
 package com.eventtv.messenger;
 
 import android.app.NotificationManager;
-import android.app.StatusBarNotification;
+
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
@@ -117,16 +117,18 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         if (MainActivity.isInForeground) {
             // notification 필드가 있는 메시지는 FCM SDK가 시스템 알림을 자동 생성할 수 있음
             // 포그라운드 상태이므로 시스템이 자동 생성한 팝업 알림을 즉시 취소
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                try {
-                    StatusBarNotification[] active = manager.getActiveNotifications();
-                    for (StatusBarNotification sbn : active) {
-                        if (sbn.getId() != MainActivity.BADGE_NOTIFICATION_ID) {
-                            manager.cancel(sbn.getId());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        android.app.StatusBarNotification[] active = manager.getActiveNotifications();
+                        for (android.app.StatusBarNotification sbn : active) {
+                            if (sbn.getId() != MainActivity.BADGE_NOTIFICATION_ID) {
+                                manager.cancel(sbn.getId());
+                            }
                         }
-                    }
-                } catch (Exception ignored) {}
-            }, 200L);
+                    } catch (Exception ignored) {}
+                }, 200L);
+            }
             return;
         }
 
