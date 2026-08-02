@@ -114,6 +114,18 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         // ── 2단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
         if (MainActivity.isInForeground) {
+            // notification 필드가 있는 메시지는 FCM SDK가 시스템 알림을 자동 생성할 수 있음
+            // 포그라운드 상태이므로 시스템이 자동 생성한 팝업 알림을 즉시 취소
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    android.app.StatusBarNotification[] active = manager.getActiveNotifications();
+                    for (android.app.StatusBarNotification sbn : active) {
+                        if (sbn.getId() != MainActivity.BADGE_NOTIFICATION_ID) {
+                            manager.cancel(sbn.getId());
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }, 200L);
             return;
         }
 
