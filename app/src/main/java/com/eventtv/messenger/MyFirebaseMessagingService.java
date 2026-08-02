@@ -1,6 +1,7 @@
 package com.eventtv.messenger;
 
 import android.app.NotificationManager;
+import android.app.StatusBarNotification;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
@@ -118,8 +119,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             // 포그라운드 상태이므로 시스템이 자동 생성한 팝업 알림을 즉시 취소
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try {
-                    android.app.StatusBarNotification[] active = manager.getActiveNotifications();
-                    for (android.app.StatusBarNotification sbn : active) {
+                    StatusBarNotification[] active = manager.getActiveNotifications();
+                    for (StatusBarNotification sbn : active) {
                         if (sbn.getId() != MainActivity.BADGE_NOTIFICATION_ID) {
                             manager.cancel(sbn.getId());
                         }
