@@ -132,12 +132,13 @@ public class AndroidBridge {
         try {
             me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
         } catch (Exception ignored) {}
-        // FCM 배지 알림도 취소
+        // Samsung One UI는 남아 있는 개별 FCM 알림도 앱 아이콘 배지에 합산한다.
+        // 실제 미읽음 수가 0일 때 EventTV의 모든 알림을 정리해야 아이콘 배지도 정확히 사라진다.
         try {
             android.app.NotificationManager nm = (android.app.NotificationManager)
                 context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             if (nm != null) {
-                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+                nm.cancelAll();
             }
         } catch (Exception ignored) {}
     }
@@ -163,7 +164,8 @@ public class AndroidBridge {
                 context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
             if (count <= 0) {
-                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+                // One UI는 남아 있는 개별 FCM 알림도 배지에 합산하므로 모두 정리한다.
+                nm.cancelAll();
             } else {
                 android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
                     context, 1,
@@ -174,7 +176,7 @@ public class AndroidBridge {
                         : android.app.PendingIntent.FLAG_UPDATE_CURRENT
                 );
                 String channelId = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
-                    ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+                    ? MainActivity.CHANNEL_BADGE : MainActivity.CHANNEL_ID;
                 androidx.core.app.NotificationCompat.Builder builder =
                     new androidx.core.app.NotificationCompat.Builder(context, channelId)
                         .setSmallIcon(R.drawable.ic_notification)
@@ -223,15 +225,10 @@ public class AndroidBridge {
                         .getJSONObject("json")
                         .getInt("total");
                     android.util.Log.d("EventTV", "[배지] 서버 미읽음 수: " + total);
-                    MainActivity.currentUnreadCount = total;
-                    // ShortcutBadger로 아이콘 배지 즉시 갱신
-                    try {
-                        if (total > 0) {
-                            me.leolin.shortcutbadger.ShortcutBadger.applyCount(context, total);
-                        } else {
-                            me.leolin.shortcutbadger.ShortcutBadger.removeCount(context);
-                        }
-                    } catch (Exception ignored) {}
+                    // 서버 값만 단일 진실의 원천으로 사용한다.
+                    // ShortcutBadger만 갱신하면 One UI의 알림 기반 배지가 남을 수 있으므로
+                    // 고정 배지 알림까지 함께 갱신/취소하는 setBadgeCount를 사용한다.
+                    setBadgeCount(total);
                 }
                 conn.disconnect();
             } catch (Exception e) {

@@ -96,7 +96,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             PendingIntent badgePendingIntent = PendingIntent.getActivity(this, 1, badgeIntent, badgeFlags);
 
             String badgeChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? MainActivity.CHANNEL_VIB_OFF : MainActivity.CHANNEL_ID;
+                ? MainActivity.CHANNEL_BADGE : MainActivity.CHANNEL_ID;
 
             NotificationCompat.Builder badgeBuilder = new NotificationCompat.Builder(this, badgeChannelId)
                 .setSmallIcon(R.drawable.ic_notification)
@@ -231,8 +231,6 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setContentText(body)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setNumber(badgeCount)
-            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
             .setContentIntent(pendingIntent);
 
         int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
