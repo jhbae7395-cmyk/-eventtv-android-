@@ -303,7 +303,10 @@ public class MainActivity extends AppCompatActivity {
                 "  return handled ? 'handled' : 'nothandled';" +
                 "})()",
                 value -> {
-                    if (value == null || !value.contains("handled")) {
+                    // evaluateJavascript의 반환값은 JSON 문자열이므로 "nothandled"에도
+                    // "handled"가 포함된다. 부분 문자열이 아닌 정확한 결과만 처리 완료로 본다.
+                    boolean wasHandled = "\"handled\"".equals(value) || "handled".equals(value);
+                    if (!wasHandled) {
                         runOnUiThread(() -> {
                             if (webView.canGoBack()) {
                                 webView.goBack();
