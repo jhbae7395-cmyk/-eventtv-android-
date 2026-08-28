@@ -90,6 +90,9 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // DOM 저장소와 함께 WebView 데이터베이스를 사용해 재실행 시 세션·캐시 복원을 돕는다.
+        // 실시간 메신저 특성상 LOAD_DEFAULT는 유지하여 오래된 대화만 표시하지 않는다.
+        settings.setDatabaseEnabled(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
@@ -201,24 +204,8 @@ public class MainActivity extends AppCompatActivity {
         // FCM 알림 또는 Android 공유 메뉴로 앱을 실행한 경우 처리
         handleIntent(getIntent());
 
-        // FCM 토큰 가져오기 (webView 초기화 후에 실행)
-        FirebaseMessaging.getInstance().getToken()
-            .addOnCompleteListener(task -> {
-                if (task.isSuccessful() && task.getResult() != null) {
-                    String token = task.getResult();
-                    android.util.Log.d("EventTV", "[FCM] 토큰 획득: " + token.substring(0, Math.min(20, token.length())) + "...");
-                    webView.post(() ->
-                        webView.evaluateJavascript(
-                            "window.fcmToken = '" + token + "'; " +
-                            "window.__fcmToken = '" + token + "'; " +
-                            "if (window.onFcmToken) window.onFcmToken('" + token + "');",
-                            null
-                        )
-                    );
-                } else {
-                    android.util.Log.w("EventTV", "[FCM] 토큰 획득 실패: " + task.getException());
-                }
-            });
+        // FCM 토큰은 onPageFinished에서 한 번만 주입한다. 초기 loadUrl 직후의 중복
+        // 요청은 아직 준비되지 않은 JavaScript 컨텍스트에 전달돼 시작 속도만 늦췄다.
     }
 
     @Override
@@ -301,6 +288,8 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
+        // 백그라운드에서 중지된 WebView 타이머가 있을 경우 즉시 재개한다.
+        if (webView != null) webView.onResume();
         // 앱 포그라운드 진입 시 알림 트레이의 FCM 알림 모두 취소 → 아이콘 배지 제거
         // (알림 트레이에 setNumber가 있으면 ShortcutBadger보다 우선 표시되므로 반드시 취소)
         try {
@@ -345,6 +334,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         // 정적 변수로 백그라운드 상태 설정
         isInForeground = false;
+        if (webView != null) webView.onPause();
         // 소켓으로도 서버에 알림
         if (webView != null) {
             webView.post(() ->
