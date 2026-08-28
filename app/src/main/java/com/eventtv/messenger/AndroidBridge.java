@@ -30,6 +30,17 @@ public class AndroidBridge {
         this.context = context;
     }
 
+    /**
+     * Android 공유 메뉴에서 전달된 파일 수를 웹 메신저가 채팅방 선택 후 확인한다.
+     */
+    @JavascriptInterface
+    public int getPendingSharedFileCount() {
+        if (context instanceof MainActivity) {
+            return ((MainActivity) context).getPendingSharedFileCount();
+        }
+        return 0;
+    }
+
     @JavascriptInterface
     public void vibrate() {
         Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);

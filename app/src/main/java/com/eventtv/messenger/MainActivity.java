@@ -23,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
 import me.leolin.shortcutbadger.ShortcutBadger;
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -49,6 +50,8 @@ public class MainActivity extends AppCompatActivity {
 
     // 파일 선택 콜백
     private ValueCallback<Uri[]> filePathCallback;
+    // 공유 메뉴에서 받은 파일은 사용자가 대화방을 고른 뒤 첨부할 때 WebView에 전달한다.
+    private final ArrayList<Uri> pendingSharedUris = new ArrayList<>();
     private final ActivityResultLauncher<Intent> fileChooserLauncher =
         registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
             if (filePathCallback == null) return;
@@ -150,6 +153,16 @@ public class MainActivity extends AppCompatActivity {
                 }
                 MainActivity.this.filePathCallback = filePathCallback;
 
+                // 공유 메뉴에서 전달된 파일은 메신저 첨부 버튼을 누르면 바로 반환한다.
+                if (!pendingSharedUris.isEmpty()) {
+                    Uri[] sharedUris = pendingSharedUris.toArray(new Uri[0]);
+                    pendingSharedUris.clear();
+                    filePathCallback.onReceiveValue(sharedUris);
+                    MainActivity.this.filePathCallback = null;
+                    notifySharedFilesAvailable();
+                    return true;
+                }
+
                 // accept 타입 확인 (이미지 전용 여부)
                 String[] acceptTypes = fileChooserParams.getAcceptTypes();
                 boolean imageOnly = acceptTypes != null && acceptTypes.length == 1
@@ -183,10 +196,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // FCM 알림으로 앱 실행 시 처리
-        handleIntent(getIntent());
-
         webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
+
+        // FCM 알림 또는 Android 공유 메뉴로 앱을 실행한 경우 처리
+        handleIntent(getIntent());
 
         // FCM 토큰 가져오기 (webView 초기화 후에 실행)
         FirebaseMessaging.getInstance().getToken()
@@ -211,10 +224,22 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
         handleIntent(intent);
     }
 
     private void handleIntent(Intent intent) {
+        if (receiveSharedFiles(intent)) {
+            if (webView != null) {
+                String currentUrl = webView.getUrl();
+                if (currentUrl == null || !currentUrl.contains("/messenger")) {
+                    webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
+                } else {
+                    notifySharedFilesAvailable();
+                }
+            }
+            return;
+        }
         if (intent != null && intent.hasExtra("url")) {
             String url = intent.getStringExtra("url");
             if (webView != null && url != null) {
@@ -224,6 +249,51 @@ public class MainActivity extends AppCompatActivity {
                 webView.loadUrl(url);
             }
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private boolean receiveSharedFiles(Intent intent) {
+        if (intent == null) return false;
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            return false;
+        }
+
+        ArrayList<Uri> receivedUris = new ArrayList<>();
+        if (Intent.ACTION_SEND_MULTIPLE.equals(action) && intent.getClipData() != null) {
+            for (int i = 0; i < intent.getClipData().getItemCount(); i++) {
+                Uri uri = intent.getClipData().getItemAt(i).getUri();
+                if (uri != null) receivedUris.add(uri);
+            }
+        } else {
+            Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (uri != null) receivedUris.add(uri);
+            if (intent.getClipData() != null) {
+                for (int i = 0; i < intent.getClipData().getItemCount(); i++) {
+                    Uri clipUri = intent.getClipData().getItemAt(i).getUri();
+                    if (clipUri != null && !receivedUris.contains(clipUri)) receivedUris.add(clipUri);
+                }
+            }
+        }
+
+        if (receivedUris.isEmpty()) return false;
+        pendingSharedUris.clear();
+        pendingSharedUris.addAll(receivedUris);
+        notifySharedFilesAvailable();
+        return true;
+    }
+
+    public int getPendingSharedFileCount() {
+        return pendingSharedUris.size();
+    }
+
+    private void notifySharedFilesAvailable() {
+        if (webView == null) return;
+        final int count = pendingSharedUris.size();
+        webView.post(() -> webView.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('eventtvSharedFilesAvailable', { detail: { count: " + count + " } }));",
+            null
+        ));
     }
 
     @Override
