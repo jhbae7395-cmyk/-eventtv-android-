@@ -27,6 +27,9 @@ import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
+    // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
+    private static final String MESSENGER_URL =
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.33";
     private WebView webView;
     public static final String CHANNEL_ID = "eventtv_messages_v5";
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
@@ -96,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.0"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.33"
         );
 
         // JavaScript → Android 브릿지
@@ -199,7 +202,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
+        webView.loadUrl(MESSENGER_URL);
 
         // FCM 알림 또는 Android 공유 메뉴로 앱을 실행한 경우 처리
         handleIntent(getIntent());
@@ -220,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
             if (webView != null) {
                 String currentUrl = webView.getUrl();
                 if (currentUrl == null || !currentUrl.contains("/messenger")) {
-                    webView.loadUrl("https://eventtv-gpdc5ulb.manus.space/messenger");
+                    webView.loadUrl(MESSENGER_URL);
                 } else {
                     notifySharedFilesAvailable();
                 }
