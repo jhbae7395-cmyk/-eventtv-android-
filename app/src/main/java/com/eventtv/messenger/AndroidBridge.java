@@ -3,14 +3,20 @@ package com.eventtv.messenger;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.webkit.JavascriptInterface;
+import androidx.core.content.FileProvider;
 import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -39,6 +45,89 @@ public class AndroidBridge {
             return ((MainActivity) context).getPendingSharedFileCount();
         }
         return 0;
+    }
+
+    /**
+     * 메신저 이미지 URL을 내려받아 Android 시스템 공유 창으로 전달한다.
+     * WebView의 Web Share API 지원 여부와 무관하게 갤러리·메신저 등 외부 앱에 이미지 파일을 공유한다.
+     */
+    @JavascriptInterface
+    public void shareImage(String imageUrl, String fileName) {
+        if (imageUrl == null || !imageUrl.startsWith("http")) return;
+
+        new Thread(() -> {
+            try {
+                URL url = new URL(imageUrl);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(12000);
+                connection.setReadTimeout(20000);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("User-Agent", "EventTV Messenger");
+
+                String contentType = connection.getContentType();
+                if (contentType == null || !contentType.startsWith("image/")) {
+                    contentType = "image/*";
+                }
+
+                File shareDirectory = new File(context.getCacheDir(), "shared_media");
+                if (!shareDirectory.exists() && !shareDirectory.mkdirs()) {
+                    throw new IllegalStateException("공유 폴더를 만들 수 없습니다.");
+                }
+
+                String safeName = sanitizeSharedImageName(fileName, contentType);
+                File sharedImage = new File(shareDirectory, System.currentTimeMillis() + "_" + safeName);
+
+                try (InputStream input = connection.getInputStream();
+                     FileOutputStream output = new FileOutputStream(sharedImage)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, read);
+                    }
+                } finally {
+                    connection.disconnect();
+                }
+
+                Uri sharedUri = FileProvider.getUriForFile(
+                    context,
+                    context.getPackageName() + ".fileprovider",
+                    sharedImage
+                );
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType(contentType);
+                shareIntent.putExtra(Intent.EXTRA_STREAM, sharedUri);
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                shareIntent.setClipData(ClipData.newRawUri("EventTV 이미지", sharedUri));
+                openShareChooser(shareIntent);
+            } catch (Exception error) {
+                // 다운로드에 실패한 경우에도 이미지 URL을 외부 앱으로 전달할 수 있도록 텍스트 공유로 전환한다.
+                Intent linkShareIntent = new Intent(Intent.ACTION_SEND);
+                linkShareIntent.setType("text/plain");
+                linkShareIntent.putExtra(Intent.EXTRA_TEXT, imageUrl);
+                openShareChooser(linkShareIntent);
+                android.util.Log.e("EventTV", "이미지 공유 파일 준비 실패", error);
+            }
+        }).start();
+    }
+
+    private String sanitizeSharedImageName(String fileName, String contentType) {
+        String safeName = fileName == null ? "" : fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (safeName.isEmpty()) safeName = "eventtv_image";
+        if (!safeName.contains(".")) {
+            if ("image/png".equals(contentType)) safeName += ".png";
+            else if ("image/webp".equals(contentType)) safeName += ".webp";
+            else if ("image/gif".equals(contentType)) safeName += ".gif";
+            else safeName += ".jpg";
+        }
+        return safeName;
+    }
+
+    private void openShareChooser(Intent shareIntent) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Intent chooser = Intent.createChooser(shareIntent, "이미지 공유");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(chooser);
+        });
     }
 
     @JavascriptInterface

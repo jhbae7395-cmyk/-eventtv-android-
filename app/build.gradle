@@ -9,8 +9,8 @@ android {
         applicationId "com.eventtv.messenger"
         minSdk 21
         targetSdk 34
-        versionCode 47
-        versionName "1.4.33"
+        versionCode 48
+        versionName "1.4.34"
     }
     buildTypes {
         release {
