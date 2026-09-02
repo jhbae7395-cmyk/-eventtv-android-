@@ -23,13 +23,14 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
 import me.leolin.shortcutbadger.ShortcutBadger;
+import org.json.JSONObject;
 import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.34";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.35";
     private WebView webView;
     public static final String CHANNEL_ID = "eventtv_messages_v5";
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
@@ -55,6 +56,8 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     // 공유 메뉴에서 받은 파일은 사용자가 대화방을 고른 뒤 첨부할 때 WebView에 전달한다.
     private final ArrayList<Uri> pendingSharedUris = new ArrayList<>();
+    // 다른 앱에서 공유한 텍스트·URL은 사용자가 채팅방을 연 뒤 메시지 입력창에 채운다.
+    private String pendingSharedText = "";
     private final ActivityResultLauncher<Intent> fileChooserLauncher =
         registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
             if (filePathCallback == null) return;
@@ -99,7 +102,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.34"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.35"
         );
 
         // JavaScript → Android 브릿지
@@ -124,6 +127,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                // 최초 공유 진입 시 handleIntent의 이벤트가 페이지 로드 전에 발생할 수 있다.
+                // 페이지가 준비된 시점에 한 번 더 알리면 채팅방 선택 뒤에도 공유 내용이 유지된다.
+                if (!pendingSharedUris.isEmpty()) notifySharedFilesAvailable();
+                if (!pendingSharedText.isEmpty()) notifySharedTextAvailable();
                 // 페이지 로드 완료 후 FCM 토큰 재전달 (타이밍 문제 대비)
                 FirebaseMessaging.getInstance().getToken()
                     .addOnCompleteListener(task -> {
@@ -219,13 +226,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleIntent(Intent intent) {
-        if (receiveSharedFiles(intent)) {
+        if (receiveSharedContent(intent)) {
             if (webView != null) {
                 String currentUrl = webView.getUrl();
                 if (currentUrl == null || !currentUrl.contains("/messenger")) {
                     webView.loadUrl(MESSENGER_URL);
                 } else {
                     notifySharedFilesAvailable();
+                    notifySharedTextAvailable();
                 }
             }
             return;
@@ -239,6 +247,26 @@ public class MainActivity extends AppCompatActivity {
                 webView.loadUrl(url);
             }
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private boolean receiveSharedContent(Intent intent) {
+        if (intent == null) return false;
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            return false;
+        }
+
+        String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (sharedText == null || sharedText.trim().isEmpty()) {
+            sharedText = intent.getStringExtra(Intent.EXTRA_HTML_TEXT);
+        }
+        if (sharedText != null && !sharedText.trim().isEmpty()) {
+            pendingSharedText = sharedText.trim();
+        }
+
+        boolean hasSharedFiles = receiveSharedFiles(intent);
+        return hasSharedFiles || !pendingSharedText.isEmpty();
     }
 
     @SuppressWarnings("deprecation")
@@ -277,11 +305,30 @@ public class MainActivity extends AppCompatActivity {
         return pendingSharedUris.size();
     }
 
+    /**
+     * 다른 앱에서 공유한 텍스트·URL을 WebView가 한 번만 가져가도록 반환한다.
+     */
+    public String consumePendingSharedText() {
+        String sharedText = pendingSharedText;
+        pendingSharedText = "";
+        return sharedText;
+    }
+
     private void notifySharedFilesAvailable() {
         if (webView == null) return;
         final int count = pendingSharedUris.size();
         webView.post(() -> webView.evaluateJavascript(
             "window.dispatchEvent(new CustomEvent('eventtvSharedFilesAvailable', { detail: { count: " + count + " } }));",
+            null
+        ));
+    }
+
+    private void notifySharedTextAvailable() {
+        if (webView == null || pendingSharedText.isEmpty()) return;
+        final String sharedText = JSONObject.quote(pendingSharedText);
+        webView.post(() -> webView.evaluateJavascript(
+            "window.__eventtvPendingSharedText = " + sharedText + ";" +
+            "window.dispatchEvent(new CustomEvent('eventtvSharedTextAvailable'));",
             null
         ));
     }

@@ -48,6 +48,17 @@ public class AndroidBridge {
     }
 
     /**
+     * 다른 앱에서 공유된 텍스트·URL을 채팅방 선택 뒤 한 번만 반환한다.
+     */
+    @JavascriptInterface
+    public String consumePendingSharedText() {
+        if (context instanceof MainActivity) {
+            return ((MainActivity) context).consumePendingSharedText();
+        }
+        return "";
+    }
+
+    /**
      * 메신저 이미지 URL을 내려받아 Android 시스템 공유 창으로 전달한다.
      * WebView의 Web Share API 지원 여부와 무관하게 갤러리·메신저 등 외부 앱에 이미지 파일을 공유한다.
      */
