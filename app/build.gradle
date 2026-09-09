@@ -9,8 +9,8 @@ android {
         applicationId "com.eventtv.messenger"
         minSdk 21
         targetSdk 34
-        versionCode 49
-        versionName "1.4.35"
+        versionCode 50
+        versionName "1.4.36"
     }
     buildTypes {
         release {
@@ -33,6 +33,7 @@ configurations.all {
 }
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.activity:activity:1.8.2'
     implementation 'androidx.core:core:1.12.0'
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-messaging'

@@ -18,6 +18,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.PermissionRequest;
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -30,8 +31,10 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.35";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.36";
     private WebView webView;
+    private boolean isHandlingSystemBack = false;
+    private OnBackPressedCallback systemBackCallback;
     public static final String CHANNEL_ID = "eventtv_messages_v5";
     public static final String CHANNEL_ID_FOREGROUND = "eventtv_messages_fg";
     // 홈 화면 배지는 이 단일 채널의 고정 알림만 사용한다.
@@ -102,11 +105,20 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.35"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.36"
         );
 
         // JavaScript → Android 브릿지
         webView.addJavascriptInterface(new AndroidBridge(this), "Android");
+
+        // Android 13 이상 예측 뒤로가기와 하단 우측 시스템 키를 동일한 콜백으로 처리한다.
+        systemBackCallback = new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                dispatchMessengerBack();
+            }
+        };
+        getOnBackPressedDispatcher().addCallback(this, systemBackCallback);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -402,34 +414,41 @@ public class MainActivity extends AppCompatActivity {
         // 사일런트 알림 방식은 FCM 알림과 충돌하여 배지가 나타났다 사라지는 문제 발생
     }
 
-    @Override
-    public void onBackPressed() {
-        if (webView != null) {
-            // JS에 androidBack 커스텀 이벤트를 먼저 전달
-            webView.evaluateJavascript(
-                "(function() {" +
-                "  var e = new CustomEvent('androidBack', { cancelable: true });" +
-                "  var handled = !window.dispatchEvent(e);" +
-                "  return handled ? 'handled' : 'nothandled';" +
-                "})()",
-                value -> {
-                    // evaluateJavascript의 반환값은 JSON 문자열이므로 "nothandled"에도
-                    // "handled"가 포함된다. 부분 문자열이 아닌 정확한 결과만 처리 완료로 본다.
-                    boolean wasHandled = "\"handled\"".equals(value) || "handled".equals(value);
-                    if (!wasHandled) {
-                        runOnUiThread(() -> {
-                            if (webView.canGoBack()) {
-                                webView.goBack();
-                            } else {
-                                MainActivity.super.onBackPressed();
-                            }
-                        });
-                    }
-                }
-            );
-        } else {
-            super.onBackPressed();
+    private void dispatchMessengerBack() {
+        if (isHandlingSystemBack) return;
+        if (webView == null) {
+            finishFromSystemBack();
+            return;
         }
+        isHandlingSystemBack = true;
+        // JS에 androidBack 커스텀 이벤트를 먼저 전달해 열린 모바일 채팅방은 목록으로 복귀한다.
+        webView.evaluateJavascript(
+            "(function() {" +
+            "  var e = new CustomEvent('androidBack', { cancelable: true });" +
+            "  var handled = !window.dispatchEvent(e);" +
+            "  return handled ? 'handled' : 'nothandled';" +
+            "})()",
+            value -> {
+                // evaluateJavascript의 반환값은 JSON 문자열이므로 "nothandled"에도
+                // "handled"가 포함된다. 부분 문자열이 아닌 정확한 결과만 처리 완료로 본다.
+                boolean wasHandled = "\"handled\"".equals(value) || "handled".equals(value);
+                isHandlingSystemBack = false;
+                if (!wasHandled) {
+                    runOnUiThread(() -> {
+                        if (webView.canGoBack()) {
+                            webView.goBack();
+                        } else {
+                            finishFromSystemBack();
+                        }
+                    });
+                }
+            }
+        );
+    }
+
+    private void finishFromSystemBack() {
+        if (systemBackCallback != null) systemBackCallback.setEnabled(false);
+        getOnBackPressedDispatcher().onBackPressed();
     }
 
     private void createNotificationChannel() {
