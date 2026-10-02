@@ -31,7 +31,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.36";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.38";
     private WebView webView;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
@@ -105,7 +105,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.36"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.38"
         );
 
         // JavaScript → Android 브릿지
@@ -239,6 +239,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleIntent(Intent intent) {
         if (receiveSharedContent(intent)) {
+            // ACTION_SEND 인텐트를 그대로 Activity에 남겨두면 다음 날 앱을 다시 열거나
+            // 화면 회전으로 Activity가 재생성될 때 같은 파일을 다시 공유 대기열에 넣는다.
+            // 파일은 아래 pendingSharedUris에만 한 번 보관하고, 원본 인텐트는 즉시 폐기한다.
+            clearHandledShareIntent();
             if (webView != null) {
                 String currentUrl = webView.getUrl();
                 if (currentUrl == null || !currentUrl.contains("/messenger")) {
@@ -259,6 +263,17 @@ public class MainActivity extends AppCompatActivity {
                 webView.loadUrl(url);
             }
         }
+    }
+
+    /**
+     * 이미 처리한 Android 공유 인텐트가 Activity 재생성 시 다시 읽히지 않게 한다.
+     * 대기 파일 자체는 pendingSharedUris에 유지되므로 사용자가 채팅방을 선택한 뒤
+     * 한 번만 첨부할 수 있다.
+     */
+    private void clearHandledShareIntent() {
+        Intent consumedIntent = new Intent(Intent.ACTION_MAIN);
+        consumedIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        setIntent(consumedIntent);
     }
 
     @SuppressWarnings("deprecation")

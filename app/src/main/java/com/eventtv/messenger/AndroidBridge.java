@@ -1,5 +1,6 @@
 package com.eventtv.messenger;
 
+import android.app.DownloadManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -7,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.VibrationEffect;
@@ -22,6 +24,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 
 public class AndroidBridge {
@@ -52,10 +55,61 @@ public class AndroidBridge {
      */
     @JavascriptInterface
     public String consumePendingSharedText() {
-        if (context instanceof MainActivity) {
-            return ((MainActivity) context).consumePendingSharedText();
+      if (context instanceof MainActivity) {
+          return ((MainActivity) context).consumePendingSharedText();
         }
-        return "";
+      return "";
+    }
+
+    /**
+     * 메신저 첨부파일을 Android DownloadManager로 넘겨 Downloads 폴더에 저장한다.
+     * WebView의 synthetic a[download] 클릭은 Android 기기에서 다운로드를 시작하지
+     * 않는 경우가 있으므로, 파일 저장은 네이티브 시스템 다운로드 경로를 사용한다.
+     */
+    @JavascriptInterface
+    public boolean downloadFile(String downloadUrl, String requestedFileName) {
+        try {
+            Uri fileUri = Uri.parse(downloadUrl);
+            if (!isTrustedDownloadUri(fileUri)) {
+                android.util.Log.w("EventTV", "허용되지 않은 다운로드 URL: " + downloadUrl);
+                return false;
+            }
+
+            DownloadManager downloadManager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+            if (downloadManager == null) return false;
+
+            String fileName = sanitizeDownloadFileName(requestedFileName, fileUri);
+            DownloadManager.Request request = new DownloadManager.Request(fileUri);
+            request.setTitle(fileName);
+            request.setDescription("EventTV 메신저 파일 다운로드");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            String mimeType = URLConnection.guessContentTypeFromName(fileName);
+            if (mimeType != null) request.setMimeType(mimeType);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+            downloadManager.enqueue(request);
+            return true;
+        } catch (Exception error) {
+            android.util.Log.e("EventTV", "메신저 파일 다운로드 요청 실패", error);
+            return false;
+        }
+    }
+
+    private boolean isTrustedDownloadUri(Uri uri) {
+        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
+        String host = uri.getHost();
+        if (host == null) return false;
+        return "eventtv.kr".equalsIgnoreCase(host)
+            || "www.eventtv.kr".equalsIgnoreCase(host)
+            || "eventtv-gpdc5ulb.manus.space".equalsIgnoreCase(host)
+            || "pub-633365e300c24c12a85b0de59e098bd4.r2.dev".equalsIgnoreCase(host);
+    }
+
+    private String sanitizeDownloadFileName(String requestedFileName, Uri fileUri) {
+        String name = requestedFileName == null ? "" : requestedFileName.trim();
+        if (name.isEmpty()) name = fileUri.getLastPathSegment();
+        if (name == null || name.trim().isEmpty()) name = "eventtv-download";
+        name = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+        return name.length() > 180 ? name.substring(0, 180) : name;
     }
 
     /**
