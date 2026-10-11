@@ -31,6 +31,7 @@ public class AndroidBridge {
     private final Context context;
     static final String PREFS_NAME = "eventtv_prefs";
     static final String KEY_EMPLOYEE_ID = "employee_id";  // employeeId 저장 (숫자)
+    static final String KEY_EMPLOYEE_TOKEN = "employee_token"; // FCM 토큰 갱신 시 본인 인증용
     static final String KEY_NOTIFICATION_SOUND = "notification_sound";  // 알림 소리 켜기/끄기
     static final String KEY_NOTIFICATION_VOLUME = "notification_volume"; // 알림 볼륨 0~100
     static final String KEY_VIBRATION_DURATION = "vibration_duration"; // 진동 시간 ms (0=진동 끄기)
@@ -233,6 +234,25 @@ public class AndroidBridge {
         android.util.Log.d("EventTV", "[설정] 알림 소리: " + (enabled ? "켜기" : "끄기"));
     }
 
+    /** Android 시스템 알림 권한 상태를 WebView에 전달한다. */
+    @JavascriptInterface
+    public String getNotificationPermissionStatus() {
+        if (context instanceof MainActivity) {
+            return ((MainActivity) context).getNotificationPermissionStatus();
+        }
+        return "disabled";
+    }
+
+    /** 사용자가 메신저 알림을 켤 때만 Android 권한 팝업 또는 앱 설정을 연다. */
+    @JavascriptInterface
+    public boolean requestNotificationPermission() {
+        if (!(context instanceof MainActivity)) return false;
+        final MainActivity activity = (MainActivity) context;
+        final boolean[] granted = {false};
+        activity.runOnUiThread(() -> granted[0] = activity.requestNotificationPermissionFromUser());
+        return granted[0];
+    }
+
     /**
      * 알림 볼륨 반환 (0~100, 기본값: 67)
      */
@@ -418,6 +438,17 @@ public class AndroidBridge {
         }
     }
 
+    /** 로그인 토큰을 별도로 보관해 FCM 토큰 갱신 시 본인 계정에만 연결한다. */
+    @JavascriptInterface
+    public void setEmployeeFcmAuth(String employeeToken) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit().putString(KEY_EMPLOYEE_TOKEN, employeeToken == null ? "" : employeeToken).apply();
+        } catch (Exception e) {
+            android.util.Log.e("EventTV", "setEmployeeFcmAuth error: " + e.getMessage());
+        }
+    }
+
     /**
      * 직원 로그아웃 시 호출 - SharedPreferences에서 employeeId 제거
      * @param employeeId 직원 ID (숫자 문자열)
@@ -426,7 +457,7 @@ public class AndroidBridge {
     public void onEmployeeLogout(String employeeId) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            prefs.edit().remove(KEY_EMPLOYEE_ID).apply();
+            prefs.edit().remove(KEY_EMPLOYEE_ID).remove(KEY_EMPLOYEE_TOKEN).apply();
             android.util.Log.d("EventTV", "[FCM] onEmployeeLogout - employeeId: " + employeeId);
         } catch (Exception e) {
             android.util.Log.e("EventTV", "onEmployeeLogout error: " + e.getMessage());

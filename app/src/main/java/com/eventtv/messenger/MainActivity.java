@@ -1,14 +1,19 @@
 package com.eventtv.messenger;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.os.Vibrator;
 import android.os.VibrationEffect;
 import android.webkit.ValueCallback;
@@ -22,6 +27,7 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NotificationManagerCompat;
 import com.google.firebase.messaging.FirebaseMessaging;
 import me.leolin.shortcutbadger.ShortcutBadger;
 import org.json.JSONObject;
@@ -31,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.38";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.39";
     private WebView webView;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
@@ -46,6 +52,8 @@ public class MainActivity extends AppCompatActivity {
     public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v3";   // 짧게 300ms
     public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v3"; // 기본 700ms
     public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v3";    // 길게 1500ms
+    private static final String KEY_NOTIFICATION_PERMISSION_REQUESTED =
+        "notification_permission_requested";
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
     public static boolean isInForeground = false;
@@ -83,6 +91,12 @@ public class MainActivity extends AppCompatActivity {
             filePathCallback = null;
         });
 
+    private final ActivityResultLauncher<String> notificationPermissionLauncher =
+        registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+            android.util.Log.i("EventTV", "[알림] Android 알림 권한 결과: " + granted);
+            notifyNotificationPermissionStatus();
+        });
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,6 +105,9 @@ public class MainActivity extends AppCompatActivity {
 
         // 알림 채널 생성 (Android 8.0+)
         createNotificationChannel();
+        // Android 13 이상에서는 첫 실행 때 시스템 알림 권한을 요청한다. 거부 후에는
+        // 사용자가 메신저 설정에서 다시 선택할 때만 앱 설정 화면을 열어 반복 팝업을 막는다.
+        requestNotificationPermissionIfNeeded(false);
 
         webView = findViewById(R.id.webview);
         WebSettings settings = webView.getSettings();
@@ -105,7 +122,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.38"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.39"
         );
 
         // JavaScript → Android 브릿지
@@ -158,6 +175,7 @@ public class MainActivity extends AppCompatActivity {
                             );
                         }
                     });
+                notifyNotificationPermissionStatus();
             }
         });
 
@@ -367,6 +385,7 @@ public class MainActivity extends AppCompatActivity {
         isInForeground = true;
         // 백그라운드에서 중지된 WebView 타이머가 있을 경우 즉시 재개한다.
         if (webView != null) webView.onResume();
+        notifyNotificationPermissionStatus();
         // 앱 포그라운드 진입 시 알림 트레이의 FCM 알림 모두 취소 → 아이콘 배지 제거
         // (알림 트레이에 setNumber가 있으면 ShortcutBadger보다 우선 표시되므로 반드시 취소)
         try {
@@ -464,6 +483,80 @@ public class MainActivity extends AppCompatActivity {
     private void finishFromSystemBack() {
         if (systemBackCallback != null) systemBackCallback.setEnabled(false);
         getOnBackPressedDispatcher().onBackPressed();
+    }
+
+    /**
+     * Android 13+의 런타임 알림 권한과 사용자가 앱 전체 알림을 끈 상태를 함께 확인한다.
+     * WebView는 이 값을 읽어 "켜짐"으로 오인하지 않고, 사용자 클릭 때만 설정으로 안내한다.
+     */
+    public String getNotificationPermissionStatus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return "permission_required";
+        }
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            return "disabled";
+        }
+        return "granted";
+    }
+
+    /** 메시지 알림에 사용할 앱 전체·선택 채널 상태를 함께 확인한다. channelId가 null이면 앱 전체만 확인한다. */
+    public static boolean canDeliverMessageNotification(Context context, String channelId) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && channelId != null) {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            NotificationChannel channel = manager == null ? null : manager.getNotificationChannel(channelId);
+            return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
+        }
+        return true;
+    }
+
+    /** WebView의 사용자 동작에서 권한을 요청하거나, 이미 거부된 경우 앱 알림 설정을 연다. */
+    public boolean requestNotificationPermissionFromUser() {
+        return requestNotificationPermissionIfNeeded(true);
+    }
+
+    private boolean requestNotificationPermissionIfNeeded(boolean userInitiated) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            boolean enabled = NotificationManagerCompat.from(this).areNotificationsEnabled();
+            if (!enabled && userInitiated) openAppNotificationSettings();
+            return enabled;
+        }
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            boolean enabled = NotificationManagerCompat.from(this).areNotificationsEnabled();
+            if (!enabled && userInitiated) openAppNotificationSettings();
+            return enabled;
+        }
+
+        SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        boolean alreadyRequested = prefs.getBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, false);
+        if (!alreadyRequested) {
+            prefs.edit().putBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, true).apply();
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+        } else if (userInitiated) {
+            openAppNotificationSettings();
+        }
+        return false;
+    }
+
+    private void openAppNotificationSettings() {
+        Intent settingsIntent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+        startActivity(settingsIntent);
+    }
+
+    /** 네이티브 권한·설정 변경을 열린 WebView의 알림 메뉴에 즉시 반영한다. */
+    private void notifyNotificationPermissionStatus() {
+        if (webView == null) return;
+        final String status = JSONObject.quote(getNotificationPermissionStatus());
+        webView.post(() -> webView.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('eventtvNotificationPermissionChanged', { detail: { status: " + status + " } }));",
+            null
+        ));
     }
 
     private void createNotificationChannel() {

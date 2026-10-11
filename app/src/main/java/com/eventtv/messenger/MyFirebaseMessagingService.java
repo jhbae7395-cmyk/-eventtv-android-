@@ -86,6 +86,16 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null) return;
 
+        // 앱이 실제 포그라운드이면 알림·배지·소리 모두 표시하지 않는다.
+        // 서버 포그라운드 상태가 갱신되기 전 도착한 FCM도 이 앱 단의 검증으로 막는다.
+        if (MainActivity.isInForeground) return;
+
+        // Android 알림 권한이나 앱 전체 알림이 꺼진 상태에서는 소리·진동을 우회하지 않는다.
+        if (!MainActivity.canDeliverMessageNotification(this, null)) {
+            android.util.Log.w("EventTV", "[FCM] Android 알림 권한 또는 메시지 채널이 비활성화되어 표시하지 않음");
+            return;
+        }
+
         // ── 1단계: 배지 전용 알림 업데이트 ──────────────────────────────────────
         {
             Intent badgeIntent = new Intent(this, MainActivity.class);
@@ -113,20 +123,14 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
         }
 
-        // ── 2단계: 포그라운드 상태이면 팝업 알림 표시 안 함 ──────────────────────
-        // 서버에서 포그라운드 직원에게는 FCM을 발송하지 않으므로 단순 return으로 처리
-        if (MainActivity.isInForeground) {
-            return;
-        }
-
-        // ── 3단계: 소리 설정 확인 ────────────────────────────────────────────────
+        // ── 2단계: 소리 설정 확인 ────────────────────────────────────────────────
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
         int volumePct = prefs.getInt(AndroidBridge.KEY_NOTIFICATION_VOLUME, 67);
         float volumeFloat = volumePct / 100.0f;
         int vibDurationMs = prefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
 
-        // ── 4단계: 알림음 재생 (Ringtone 방식 - Doze 모드에서도 안정적) ──────────
+        // ── 3단계: 알림음 재생 (Ringtone 방식 - Doze 모드에서도 안정적) ──────────
         if (soundEnabled) {
             try {
                 // 볼륨 설정
@@ -166,7 +170,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             }
         }
 
-        // ── 5단계: 진동 (Android 8+ 채널 진동 + 직접 진동 병행) ─────────────────
+        // ── 4단계: 진동 (Android 8+ 채널 진동 + 직접 진동 병행) ─────────────────
         if (vibDurationMs > 0) {
             try {
                 long vd = vibDurationMs;
@@ -200,7 +204,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             }
         }
 
-        // ── 6단계: 팝업 알림 발행 ────────────────────────────────────────────────
+        // ── 5단계: 팝업 알림 발행 ────────────────────────────────────────────────
         // 진동 설정에 따른 채널 선택
         String selectedChannelId;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -215,6 +219,11 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             }
         } else {
             selectedChannelId = MainActivity.CHANNEL_ID;
+        }
+
+        if (!MainActivity.canDeliverMessageNotification(this, selectedChannelId)) {
+            android.util.Log.w("EventTV", "[FCM] 선택한 메시지 알림 채널이 비활성화되어 표시하지 않음");
+            return;
         }
 
         Intent intent = new Intent(this, MainActivity.class);
@@ -244,29 +253,23 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         String employeeIdStr = prefs.getString(AndroidBridge.KEY_EMPLOYEE_ID, null);
-        if (employeeIdStr == null || employeeIdStr.isEmpty()) {
-            android.util.Log.w("EventTV", "[FCM] onNewToken: employeeId 없음 - 서버 업데이트 스킵");
-            return;
-        }
-        int employeeId;
-        try {
-            employeeId = Integer.parseInt(employeeIdStr);
-        } catch (NumberFormatException e) {
-            android.util.Log.e("EventTV", "[FCM] onNewToken: employeeId 파싱 실패: " + employeeIdStr);
+        String employeeToken = prefs.getString(AndroidBridge.KEY_EMPLOYEE_TOKEN, null);
+        if (employeeIdStr == null || employeeIdStr.isEmpty() || employeeToken == null || employeeToken.isEmpty()) {
+            android.util.Log.w("EventTV", "[FCM] onNewToken: 로그인 인증 정보 없음 - 다음 앱 실행 시 재등록");
             return;
         }
 
-        final int empId = employeeId;
         final String fcmToken = newToken;
+        final String token = employeeToken;
         new Thread(() -> {
             try {
                 JSONObject inputJson = new JSONObject();
-                inputJson.put("employeeId", empId);
+                inputJson.put("employeeToken", token);
                 inputJson.put("fcmToken", fcmToken);
                 JSONObject item = new JSONObject();
                 item.put("json", inputJson);
-                JSONObject batchBody = new JSONObject();
-                batchBody.put("0", item);
+                JSONObject requestBody = new JSONObject();
+                requestBody.put("0", item);
 
                 URL apiUrl = new URL(REGISTER_URL);
                 HttpURLConnection conn = (HttpURLConnection) apiUrl.openConnection();
@@ -275,13 +278,13 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 conn.setDoOutput(true);
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
-                byte[] bodyBytes = batchBody.toString().getBytes(StandardCharsets.UTF_8);
+                byte[] bodyBytes = requestBody.toString().getBytes(StandardCharsets.UTF_8);
                 OutputStream os = conn.getOutputStream();
                 os.write(bodyBytes);
                 os.flush();
                 os.close();
                 int responseCode = conn.getResponseCode();
-                android.util.Log.d("EventTV", "[FCM] onNewToken 서버 업데이트 완료: HTTP " + responseCode + " empId=" + empId);
+                android.util.Log.d("EventTV", "[FCM] onNewToken 서버 업데이트 완료: HTTP " + responseCode);
                 conn.disconnect();
             } catch (Exception e) {
                 android.util.Log.e("EventTV", "[FCM] onNewToken 서버 업데이트 실패: " + e.getMessage());
