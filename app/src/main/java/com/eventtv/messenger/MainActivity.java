@@ -37,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.39";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.40";
     private WebView webView;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
@@ -46,12 +46,16 @@ public class MainActivity extends AppCompatActivity {
     // 홈 화면 배지는 이 단일 채널의 고정 알림만 사용한다.
     public static final String CHANNEL_BADGE = "eventtv_badge_v1";
 
-    // 진동별 채널 ID (Android 8.0+ 진동 패턴 제어용)
-    // v3: 팝업 알림이 배지 수에 합산되지 않도록 전용 채널로 교체
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v3";     // 진동 없음
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v3";   // 짧게 300ms
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v3"; // 기본 700ms
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v3";    // 길게 1500ms
+    // Android는 생성 뒤 채널의 소리·중요도를 앱에서 변경할 수 없다.
+    // v4 채널은 과거 설치본의 무음/낮은 중요도 설정과 분리해 새 기본값을 적용한다.
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v4";
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v4";
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v4";
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v4";
+    public static final String CHANNEL_SILENT_VIB_OFF     = "eventtv_silent_vib_off_v4";
+    public static final String CHANNEL_SILENT_VIB_SHORT   = "eventtv_silent_vib_short_v4";
+    public static final String CHANNEL_SILENT_VIB_DEFAULT = "eventtv_silent_vib_default_v4";
+    public static final String CHANNEL_SILENT_VIB_LONG    = "eventtv_silent_vib_long_v4";
     private static final String KEY_NOTIFICATION_PERMISSION_REQUESTED =
         "notification_permission_requested";
 
@@ -104,7 +108,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         // 알림 채널 생성 (Android 8.0+)
-        createNotificationChannel();
+        ensureNotificationChannels(this);
         // Android 13 이상에서는 첫 실행 때 시스템 알림 권한을 요청한다. 거부 후에는
         // 사용자가 메신저 설정에서 다시 선택할 때만 앱 설정 화면을 열어 반복 팝업을 막는다.
         requestNotificationPermissionIfNeeded(false);
@@ -559,92 +563,91 @@ public class MainActivity extends AppCompatActivity {
         ));
     }
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationManager manager = getSystemService(NotificationManager.class);
-            if (manager == null) return;
+    /** FCM 서비스가 Activity보다 먼저 시작되어도 최신 채널을 보장한다. */
+    public static void ensureNotificationChannels(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return;
 
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .build();
+        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .build();
 
-            // ── 진동 없음 채널 ──────────────────────────────────────────────────
-            NotificationChannel chVibOff = new NotificationChannel(
-                CHANNEL_VIB_OFF, "EventTV 메시지 (진동 없음)", NotificationManager.IMPORTANCE_HIGH);
-            chVibOff.setDescription("EventTV 메신저 알림 - 진동 없음");
-            chVibOff.setShowBadge(false);
-            chVibOff.enableVibration(false);
-            chVibOff.enableLights(true);
-            chVibOff.setLightColor(0xFF00FF00);
-            chVibOff.setSound(soundUri, audioAttributes);
-            manager.createNotificationChannel(chVibOff);
+        long[] shortPattern = new long[]{0, 300, 100, 300, 100, 300};
+        long[] defaultPattern = new long[]{0, 700, 200, 700, 200, 700};
+        long[] longPattern = new long[]{0, 1500, 300, 1500, 300, 1500};
 
-            // ── 짧게 (300ms) 채널 ──────────────────────────────────────────────
-            NotificationChannel chVibShort = new NotificationChannel(
-                CHANNEL_VIB_SHORT, "EventTV 메시지 (짧은 진동)", NotificationManager.IMPORTANCE_HIGH);
-            chVibShort.setDescription("EventTV 메신저 알림 - 짧은 진동 300ms");
-            chVibShort.setShowBadge(false);
-            chVibShort.enableVibration(true);
-            chVibShort.setVibrationPattern(new long[]{0, 300, 100, 300, 100, 300});
-            chVibShort.enableLights(true);
-            chVibShort.setLightColor(0xFF00FF00);
-            chVibShort.setSound(soundUri, audioAttributes);
-            manager.createNotificationChannel(chVibShort);
+        createMessageChannel(manager, CHANNEL_VIB_OFF, "EventTV 메시지 (소리 · 진동 없음)", null, true, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_VIB_SHORT, "EventTV 메시지 (소리 · 짧은 진동)", shortPattern, true, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_VIB_DEFAULT, "EventTV 메시지 (소리 · 기본 진동)", defaultPattern, true, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_VIB_LONG, "EventTV 메시지 (소리 · 긴 진동)", longPattern, true, soundUri, audioAttributes);
 
-            // ── 기본 (700ms) 채널 ──────────────────────────────────────────────
-            NotificationChannel chVibDefault = new NotificationChannel(
-                CHANNEL_VIB_DEFAULT, "EventTV 메시지 (기본 진동)", NotificationManager.IMPORTANCE_HIGH);
-            chVibDefault.setDescription("EventTV 메신저 알림 - 기본 진동 700ms");
-            chVibDefault.setShowBadge(false);
-            chVibDefault.enableVibration(true);
-            chVibDefault.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
-            chVibDefault.enableLights(true);
-            chVibDefault.setLightColor(0xFF00FF00);
-            chVibDefault.setSound(soundUri, audioAttributes);
-            manager.createNotificationChannel(chVibDefault);
+        createMessageChannel(manager, CHANNEL_SILENT_VIB_OFF, "EventTV 메시지 (무음 · 진동 없음)", null, false, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_SILENT_VIB_SHORT, "EventTV 메시지 (무음 · 짧은 진동)", shortPattern, false, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_SILENT_VIB_DEFAULT, "EventTV 메시지 (무음 · 기본 진동)", defaultPattern, false, soundUri, audioAttributes);
+        createMessageChannel(manager, CHANNEL_SILENT_VIB_LONG, "EventTV 메시지 (무음 · 긴 진동)", longPattern, false, soundUri, audioAttributes);
 
-            // ── 길게 (1500ms) 채널 ─────────────────────────────────────────────
-            NotificationChannel chVibLong = new NotificationChannel(
-                CHANNEL_VIB_LONG, "EventTV 메시지 (긴 진동)", NotificationManager.IMPORTANCE_HIGH);
-            chVibLong.setDescription("EventTV 메신저 알림 - 긴 진동 1500ms");
-            chVibLong.setShowBadge(false);
-            chVibLong.enableVibration(true);
-            chVibLong.setVibrationPattern(new long[]{0, 1500, 300, 1500, 300, 1500});
-            chVibLong.enableLights(true);
-            chVibLong.setLightColor(0xFF00FF00);
-            chVibLong.setSound(soundUri, audioAttributes);
-            manager.createNotificationChannel(chVibLong);
+        NotificationChannel fgChannel = new NotificationChannel(
+            CHANNEL_ID_FOREGROUND, "EventTV 앱 내 알림", NotificationManager.IMPORTANCE_LOW);
+        fgChannel.setDescription("앱 사용 중 알림");
+        fgChannel.enableVibration(false);
+        fgChannel.setSound(null, null);
+        manager.createNotificationChannel(fgChannel);
 
-            // ── 포그라운드 알림 채널 (낮은 우선순위 - 소리/진동 없음) ──────────
-            NotificationChannel fgChannel = new NotificationChannel(
-                CHANNEL_ID_FOREGROUND, "EventTV 앱 내 알림", NotificationManager.IMPORTANCE_LOW);
-            fgChannel.setDescription("앱 사용 중 알림");
-            fgChannel.enableVibration(false);
-            fgChannel.setSound(null, null);
-            manager.createNotificationChannel(fgChannel);
+        // Android 8.0 미만과 이전 앱 경로의 하위 호환용 채널
+        NotificationChannel legacyChannel = new NotificationChannel(
+            CHANNEL_ID, "EventTV 메시지", NotificationManager.IMPORTANCE_HIGH);
+        legacyChannel.setDescription("EventTV 메신저 알림");
+        legacyChannel.setShowBadge(false);
+        legacyChannel.enableVibration(true);
+        legacyChannel.setVibrationPattern(defaultPattern);
+        legacyChannel.setSound(soundUri, audioAttributes);
+        manager.createNotificationChannel(legacyChannel);
 
-            // ── 기존 채널 (하위 호환용 - 기본 진동과 동일하게 유지) ─────────────
-            NotificationChannel legacyChannel = new NotificationChannel(
-                CHANNEL_ID, "EventTV 메시지", NotificationManager.IMPORTANCE_HIGH);
-            legacyChannel.setDescription("EventTV 메신저 알림");
-            legacyChannel.setShowBadge(false);
-            legacyChannel.enableVibration(true);
-            legacyChannel.setVibrationPattern(new long[]{0, 700, 200, 700, 200, 700});
-            legacyChannel.enableLights(true);
-            legacyChannel.setLightColor(0xFF00FF00);
-            legacyChannel.setSound(soundUri, audioAttributes);
-            manager.createNotificationChannel(legacyChannel);
-
-            // 배지 전용 채널: 실제 미읽음 총수만 단일 고정 알림으로 표시
-            NotificationChannel badgeChannel = new NotificationChannel(
-                CHANNEL_BADGE, "EventTV 안읽은 메시지 수", NotificationManager.IMPORTANCE_LOW);
-            badgeChannel.setDescription("홈 화면의 EventTV 미읽음 메시지 배지 동기화용 알림");
-            badgeChannel.setShowBadge(true);
-            badgeChannel.enableVibration(false);
-            badgeChannel.setSound(null, null);
-            manager.createNotificationChannel(badgeChannel);
-        }
+        NotificationChannel badgeChannel = new NotificationChannel(
+            CHANNEL_BADGE, "EventTV 안읽은 메시지 수", NotificationManager.IMPORTANCE_LOW);
+        badgeChannel.setDescription("홈 화면의 EventTV 미읽음 메시지 배지 동기화용 알림");
+        badgeChannel.setShowBadge(true);
+        badgeChannel.enableVibration(false);
+        badgeChannel.setSound(null, null);
+        manager.createNotificationChannel(badgeChannel);
     }
+
+    private static void createMessageChannel(
+        NotificationManager manager,
+        String channelId,
+        String name,
+        long[] vibrationPattern,
+        boolean soundEnabled,
+        Uri soundUri,
+        AudioAttributes audioAttributes
+    ) {
+        NotificationChannel channel = new NotificationChannel(
+            channelId, name, NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("EventTV 메신저 메시지 알림");
+        channel.setShowBadge(false);
+        channel.enableLights(true);
+        channel.setLightColor(0xFF00FF00);
+        channel.enableVibration(vibrationPattern != null);
+        if (vibrationPattern != null) channel.setVibrationPattern(vibrationPattern);
+        channel.setSound(soundEnabled ? soundUri : null, soundEnabled ? audioAttributes : null);
+        manager.createNotificationChannel(channel);
+    }
+
+    /** 사용자가 고른 소리/진동 설정에 대응하는 채널을 반환한다. */
+    public static String getMessageChannelId(boolean soundEnabled, int vibrationDurationMs) {
+        if (vibrationDurationMs <= 0) {
+            return soundEnabled ? CHANNEL_VIB_OFF : CHANNEL_SILENT_VIB_OFF;
+        }
+        if (vibrationDurationMs <= 300) {
+            return soundEnabled ? CHANNEL_VIB_SHORT : CHANNEL_SILENT_VIB_SHORT;
+        }
+        if (vibrationDurationMs <= 700) {
+            return soundEnabled ? CHANNEL_VIB_DEFAULT : CHANNEL_SILENT_VIB_DEFAULT;
+        }
+        return soundEnabled ? CHANNEL_VIB_LONG : CHANNEL_SILENT_VIB_LONG;
+    }
+
 }
