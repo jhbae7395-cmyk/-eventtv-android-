@@ -37,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.40";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.41";
     private WebView webView;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
@@ -126,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.39"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.41"
         );
 
         // JavaScript → Android 브릿지
@@ -408,6 +408,11 @@ public class MainActivity extends AppCompatActivity {
                 webView.evaluateJavascript(
                     "(function() { " +
                     "  window._androidIsInForeground = true; " +
+                    // WebView가 백그라운드 동안 보존한 끊긴 소켓은 connected 값이 늦게
+                    // 갱신될 수 있다. 먼저 웹 메신저에 재연결을 요청하고, 열린 대화의
+                    // 최신 메시지 조회도 즉시 시작한다.
+                    "  if (typeof window.messengerReconnectWs === 'function') window.messengerReconnectWs(); " +
+                    "  window.dispatchEvent(new Event('eventtvMessengerForeground')); " +
                     "  if (!window._messengerSocket || !window._messengerSocket.connected) return; " +
                     "  var _chId = window._activeChannelId || null; " +
                     "  var _lastMsgId = null; " +
@@ -434,18 +439,18 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         // 정적 변수로 백그라운드 상태 설정
         isInForeground = false;
-        if (webView != null) webView.onPause();
-        // 소켓으로도 서버에 알림
+        // 서버에만 백그라운드 상태를 알린다. 소켓을 강제로 끊으면 복귀 시 WebSocket
+        // handshake의 최대 대기 시간만큼 새 메시지 표시가 늦어질 수 있으므로, 실제
+        // 네트워크 단절이 발생했을 때만 웹 클라이언트가 재연결하도록 유지한다.
         if (webView != null) {
-            webView.post(() ->
-                webView.evaluateJavascript(
-                    "window._androidIsInForeground = false; " +
-                    "if (window._messengerSocket && window._messengerSocket.connected) { " +
-                    "  window._messengerSocket.emit('app_background'); " +
-                    "}",
-                    null
-                )
+            webView.evaluateJavascript(
+                "window._androidIsInForeground = false; " +
+                "if (window._messengerSocket && window._messengerSocket.connected) { " +
+                "  window._messengerSocket.emit('app_background'); " +
+                "}",
+                null
             );
+            webView.onPause();
         }
         // 백그라운드 전환 시 별도 배지 알림 발행 안 함
         // FCM 알림의 setNumber(badgeCount) + 고정 ID(BADGE_NOTIFICATION_ID)가 배지 역할 담당
