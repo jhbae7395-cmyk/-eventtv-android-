@@ -6,6 +6,8 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -35,6 +37,8 @@ public class AndroidBridge {
     static final String KEY_NOTIFICATION_SOUND = "notification_sound";  // 알림 소리 켜기/끄기
     static final String KEY_NOTIFICATION_VOLUME = "notification_volume"; // 알림 볼륨 0~100
     static final String KEY_VIBRATION_DURATION = "vibration_duration"; // 진동 시간 ms (0=진동 끄기)
+    private static final long IN_APP_NOTIFICATION_TONE_THROTTLE_MS = 800L;
+    private long lastInAppNotificationToneAt = 0L;
 
     public AndroidBridge(Context context) {
         this.context = context;
@@ -232,6 +236,33 @@ public class AndroidBridge {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().putBoolean(KEY_NOTIFICATION_SOUND, enabled).apply();
         android.util.Log.d("EventTV", "[설정] 알림 소리: " + (enabled ? "켜기" : "끄기"));
+    }
+
+    /**
+     * 메신저 화면이 실제로 열려 있을 때만 짧은 수신음을 재생한다.
+     * 시스템 알림은 만들지 않고 Android 알림 스트림을 사용하므로 기기의 알림 음량,
+     * 방해 금지 모드 및 사용자가 꺼 둔 앱 소리 설정을 모두 그대로 따른다.
+     */
+    @JavascriptInterface
+    public void playInAppNotificationTone() {
+        if (!MainActivity.isInForeground || !getNotificationSound()) return;
+
+        synchronized (this) {
+            long now = System.currentTimeMillis();
+            if (now - lastInAppNotificationToneAt < IN_APP_NOTIFICATION_TONE_THROTTLE_MS) {
+                return;
+            }
+            lastInAppNotificationToneAt = now;
+        }
+
+        try {
+            final ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80);
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 160);
+            new Handler(Looper.getMainLooper()).postDelayed(tone::release, 300L);
+        } catch (RuntimeException e) {
+            // 기기 오디오 서비스가 일시적으로 사용할 수 없는 경우 메시지 수신은 계속 진행한다.
+            android.util.Log.w("EventTV", "[알림] 앱 내 수신음 재생 실패", e);
+        }
     }
 
     /** Android 시스템 알림 권한 상태를 WebView에 전달한다. */

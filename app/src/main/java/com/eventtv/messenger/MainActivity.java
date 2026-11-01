@@ -37,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.41";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.42";
     private WebView webView;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
@@ -47,20 +47,20 @@ public class MainActivity extends AppCompatActivity {
     public static final String CHANNEL_BADGE = "eventtv_badge_v1";
 
     // Android는 생성 뒤 채널의 소리·중요도를 앱에서 변경할 수 없다.
-    // v4 채널은 과거 설치본의 무음/낮은 중요도 설정과 분리해 새 기본값을 적용한다.
-    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v4";
-    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v4";
-    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v4";
-    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v4";
-    public static final String CHANNEL_SILENT_VIB_OFF     = "eventtv_silent_vib_off_v4";
-    public static final String CHANNEL_SILENT_VIB_SHORT   = "eventtv_silent_vib_short_v4";
-    public static final String CHANNEL_SILENT_VIB_DEFAULT = "eventtv_silent_vib_default_v4";
-    public static final String CHANNEL_SILENT_VIB_LONG    = "eventtv_silent_vib_long_v4";
+    // v5 채널은 과거 설치본의 무음/낮은 중요도 설정과 분리해 새 기본값을 적용한다.
+    public static final String CHANNEL_VIB_OFF     = "eventtv_vib_off_v5";
+    public static final String CHANNEL_VIB_SHORT   = "eventtv_vib_short_v5";
+    public static final String CHANNEL_VIB_DEFAULT = "eventtv_vib_default_v5";
+    public static final String CHANNEL_VIB_LONG    = "eventtv_vib_long_v5";
+    public static final String CHANNEL_SILENT_VIB_OFF     = "eventtv_silent_vib_off_v5";
+    public static final String CHANNEL_SILENT_VIB_SHORT   = "eventtv_silent_vib_short_v5";
+    public static final String CHANNEL_SILENT_VIB_DEFAULT = "eventtv_silent_vib_default_v5";
+    public static final String CHANNEL_SILENT_VIB_LONG    = "eventtv_silent_vib_long_v5";
     private static final String KEY_NOTIFICATION_PERMISSION_REQUESTED =
         "notification_permission_requested";
 
     // 포그라운드 상태 정적 변수 - MyFirebaseMessagingService에서 참조
-    public static boolean isInForeground = false;
+    public static volatile boolean isInForeground = false;
 
     // FCM 알림 고정 ID (항상 동일한 ID로 업데이트하여 배지 숫자 정확히 표시)
     public static final int BADGE_NOTIFICATION_ID = 99999;
@@ -126,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.41"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.42"
         );
 
         // JavaScript → Android 브릿지
