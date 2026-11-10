@@ -11,7 +11,7 @@ final class MessageNotificationTonePolicy {
     private final Set<String> recentMessageIds = new LinkedHashSet<>();
 
     static boolean isFiveToneEmployee(String localEmployeeId) {
-        return FIVE_TONE_EMPLOYEE_ID.equals(localEmployeeId);
+        return FIVE_TONE_EMPLOYEE_ID.equals(localEmployeeId) || "300002".equals(localEmployeeId);
     }
 
     static boolean shouldUseFiveToneChannel(
@@ -20,7 +20,8 @@ final class MessageNotificationTonePolicy {
         // count 단독으로는 절대 맞춤 채널을 선택하지 않는다. 이벤트/다른 직원은 기존 채널이다.
         return isFiveToneEmployee(localEmployeeId)
             && "messenger_message".equals(type)
-            && FIVE_TONE_EMPLOYEE_ID.equals(payloadEmployeeId)
+            && payloadEmployeeId != null
+            && payloadEmployeeId.equals(localEmployeeId)
             && "5".equals(toneRepeatCount);
     }
 

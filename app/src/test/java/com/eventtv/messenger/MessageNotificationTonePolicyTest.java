@@ -13,14 +13,17 @@ public final class MessageNotificationTonePolicyTest {
     }
 
     public static void main(String[] args) {
-        String[] employees = {null, "", "60001", "60002", "60001 ", "060001"};
+        String[] employees = {null, "", "60001", "300002", "60002", "60001 ", "060001", "300002 ", "0300002"};
         String[] types = {null, "", "messenger_message", "website_event", "approval_event"};
         String[] counts = {null, "", "5", "1", "05", "5.0", "500"};
         for (String local : employees) {
+            check(MessageNotificationTonePolicy.isFiveToneEmployee(local)
+                == ("60001".equals(local) || "300002".equals(local)), "exact target employee IDs only");
             for (String recipient : employees) {
                 for (String type : types) {
                     for (String count : counts) {
-                        boolean expected = "60001".equals(local) && "60001".equals(recipient)
+                        boolean expected = ("60001".equals(local) || "300002".equals(local))
+                            && local.equals(recipient)
                             && "messenger_message".equals(type) && "5".equals(count);
                         check(MessageNotificationTonePolicy.shouldUseFiveToneChannel(local, type, recipient, count)
                             == expected, "strict recipient/type/count policy");
@@ -28,8 +31,17 @@ public final class MessageNotificationTonePolicyTest {
                 }
             }
         }
-        check(MessageNotificationTonePolicy.isFiveToneEmployee("60001"), "target employee");
+        check(MessageNotificationTonePolicy.isFiveToneEmployee("60001"), "existing target retained");
+        check(MessageNotificationTonePolicy.isFiveToneEmployee("300002"), "additional target employee");
         check(!MessageNotificationTonePolicy.isFiveToneEmployee("60002"), "other employee");
+        check(MessageNotificationTonePolicy.shouldUseFiveToneChannel("60001", "messenger_message", "60001", "5"),
+            "60001 matching payload keeps five-tone channel");
+        check(MessageNotificationTonePolicy.shouldUseFiveToneChannel("300002", "messenger_message", "300002", "5"),
+            "300002 matching payload uses five-tone channel");
+        check(!MessageNotificationTonePolicy.shouldUseFiveToneChannel("60001", "messenger_message", "300002", "5"),
+            "60001 must reject 300002 payload");
+        check(!MessageNotificationTonePolicy.shouldUseFiveToneChannel("300002", "messenger_message", "60001", "5"),
+            "300002 must reject 60001 payload");
 
         int[] durations = {-1, 0, 1, 300, 301, 700, 701, 1500};
         String[] expectedVariants = {"off", "off", "short", "short", "default", "default", "long", "long"};
