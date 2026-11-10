@@ -120,12 +120,20 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
         int vibrationDurationMs = prefs.getInt(AndroidBridge.KEY_VIBRATION_DURATION, 700);
+        boolean fiveToneMessage = MessageNotificationTonePolicy.shouldUseFiveToneChannel(
+            prefs.getString(AndroidBridge.KEY_EMPLOYEE_ID, null),
+            remoteMessage.getData().get("type"),
+            remoteMessage.getData().get("employeeId"),
+            remoteMessage.getData().get("toneRepeatCount")
+        );
 
         // Android 8.0 이상에서는 NotificationChannel만이 소리·진동을 결정한다.
         // 앱이 Ringtone/Vibrator 또는 기기 전체 알림 볼륨을 직접 변경하지 않아 기종별
         // 무음·중복 재생과 사용자 시스템 설정 변경을 막는다.
         String selectedChannelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-            ? MainActivity.getMessageChannelId(soundEnabled, vibrationDurationMs)
+            ? (fiveToneMessage
+                ? MainActivity.getFiveToneMessageChannelId(soundEnabled, vibrationDurationMs)
+                : MainActivity.getMessageChannelId(soundEnabled, vibrationDurationMs))
             : MainActivity.CHANNEL_ID;
 
         if (!MainActivity.canDeliverMessageNotification(this, selectedChannelId)) {

@@ -37,8 +37,9 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.42";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.43";
     private WebView webView;
+    private AndroidBridge androidBridge;
     private boolean isHandlingSystemBack = false;
     private OnBackPressedCallback systemBackCallback;
     public static final String CHANNEL_ID = "eventtv_messages_v5";
@@ -126,11 +127,12 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.42"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.43"
         );
 
         // JavaScript → Android 브릿지
-        webView.addJavascriptInterface(new AndroidBridge(this), "Android");
+        androidBridge = new AndroidBridge(this);
+        webView.addJavascriptInterface(androidBridge, "Android");
 
         // Android 13 이상 예측 뒤로가기와 하단 우측 시스템 키를 동일한 콜백으로 처리한다.
         systemBackCallback = new OnBackPressedCallback(true) {
@@ -439,6 +441,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         // 정적 변수로 백그라운드 상태 설정
         isInForeground = false;
+        if (androidBridge != null) androidBridge.stopMessageNotificationTones();
         // 서버에만 백그라운드 상태를 알린다. 소켓을 강제로 끊으면 복귀 시 WebSocket
         // handshake의 최대 대기 시간만큼 새 메시지 표시가 늦어질 수 있으므로, 실제
         // 네트워크 단절이 발생했을 때만 웹 클라이언트가 재연결하도록 유지한다.
@@ -455,6 +458,12 @@ public class MainActivity extends AppCompatActivity {
         // 백그라운드 전환 시 별도 배지 알림 발행 안 함
         // FCM 알림의 setNumber(badgeCount) + 고정 ID(BADGE_NOTIFICATION_ID)가 배지 역할 담당
         // 사일런트 알림 방식은 FCM 알림과 충돌하여 배지가 나타났다 사라지는 문제 발생
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (androidBridge != null) androidBridge.destroy();
+        super.onDestroy();
     }
 
     private void dispatchMessengerBack() {
@@ -594,6 +603,17 @@ public class MainActivity extends AppCompatActivity {
         createMessageChannel(manager, CHANNEL_SILENT_VIB_DEFAULT, "EventTV 메시지 (무음 · 기본 진동)", defaultPattern, false, soundUri, audioAttributes);
         createMessageChannel(manager, CHANNEL_SILENT_VIB_LONG, "EventTV 메시지 (무음 · 긴 진동)", longPattern, false, soundUri, audioAttributes);
 
+        // 기존 채널은 변경하지 않는다. 맞춤 메시지만 별도 prefix의 8개 variant를 선택한다.
+        Uri fiveToneSoundUri = getFiveToneSoundUri(context);
+        createMessageChannel(manager, getFiveToneMessageChannelId(true, 0), "EventTV 메시지 5회 (소리 · 진동 없음)", null, true, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(true, 300), "EventTV 메시지 5회 (소리 · 짧은 진동)", shortPattern, true, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(true, 700), "EventTV 메시지 5회 (소리 · 기본 진동)", defaultPattern, true, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(true, 1500), "EventTV 메시지 5회 (소리 · 긴 진동)", longPattern, true, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(false, 0), "EventTV 메시지 5회 (무음 · 진동 없음)", null, false, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(false, 300), "EventTV 메시지 5회 (무음 · 짧은 진동)", shortPattern, false, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(false, 700), "EventTV 메시지 5회 (무음 · 기본 진동)", defaultPattern, false, fiveToneSoundUri, audioAttributes);
+        createMessageChannel(manager, getFiveToneMessageChannelId(false, 1500), "EventTV 메시지 5회 (무음 · 긴 진동)", longPattern, false, fiveToneSoundUri, audioAttributes);
+
         NotificationChannel fgChannel = new NotificationChannel(
             CHANNEL_ID_FOREGROUND, "EventTV 앱 내 알림", NotificationManager.IMPORTANCE_LOW);
         fgChannel.setDescription("앱 사용 중 알림");
@@ -639,6 +659,15 @@ public class MainActivity extends AppCompatActivity {
         if (vibrationPattern != null) channel.setVibrationPattern(vibrationPattern);
         channel.setSound(soundEnabled ? soundUri : null, soundEnabled ? audioAttributes : null);
         manager.createNotificationChannel(channel);
+    }
+
+    static Uri getFiveToneSoundUri(Context context) {
+        // 숫자 리소스 ID 대신 이름을 사용해 APK 업그레이드 뒤에도 채널 URI를 안정적으로 유지한다.
+        return Uri.parse("android.resource://" + context.getPackageName() + "/raw/message_five_tones");
+    }
+
+    static String getFiveToneMessageChannelId(boolean soundEnabled, int vibrationDurationMs) {
+        return MessageNotificationTonePolicy.getFiveToneChannelId(soundEnabled, vibrationDurationMs);
     }
 
     /** 사용자가 고른 소리/진동 설정에 대응하는 채널을 반환한다. */
