@@ -41,7 +41,7 @@ public class AndroidBridge {
     static final String KEY_NOTIFICATION_SOUND = "notification_sound";  // 알림 소리 켜기/끄기
     static final String KEY_NOTIFICATION_VOLUME = "notification_volume"; // 알림 볼륨 0~100
     static final String KEY_VIBRATION_DURATION = "vibration_duration"; // 진동 시간 ms (0=진동 끄기)
-    private static final long IN_APP_NOTIFICATION_TONE_THROTTLE_MS = 800L;
+    private static final long IN_APP_NOTIFICATION_TONE_THROTTLE_MS = 600L;
     private long lastInAppNotificationToneAt = 0L;
     private final Handler messageToneHandler = new Handler(Looper.getMainLooper());
     private final MessageNotificationTonePolicy messageTonePolicy = new MessageNotificationTonePolicy();
@@ -263,42 +263,45 @@ public class AndroidBridge {
      */
     @JavascriptInterface
     public void playInAppNotificationTone() {
-        if (!MainActivity.isInForeground || !getNotificationSound()) return;
+        playSingleNotificationTone(null);
+    }
 
+    private boolean playSingleNotificationTone(String messageId) {
+        if (!canPlayNotificationTone()) return false;
         synchronized (this) {
-            long now = System.currentTimeMillis();
-            if (now - lastInAppNotificationToneAt < IN_APP_NOTIFICATION_TONE_THROTTLE_MS) {
-                return;
-            }
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (lastInAppNotificationToneAt != 0
+                && now - lastInAppNotificationToneAt < IN_APP_NOTIFICATION_TONE_THROTTLE_MS) return false;
+            // A muted/throttled attempt must not permanently consume the message receipt.
+            if (messageId != null && !messageTonePolicy.claimMessageId(messageId)) return false;
             lastInAppNotificationToneAt = now;
         }
-
         try {
             final ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80);
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 160);
             new Handler(Looper.getMainLooper()).postDelayed(tone::release, 300L);
-        } catch (RuntimeException e) {
-            // 기기 오디오 서비스가 일시적으로 사용할 수 없는 경우 메시지 수신은 계속 진행한다.
-            android.util.Log.w("EventTV", "[알림] 앱 내 수신음 재생 실패", e);
+            return true;
+        } catch (RuntimeException error) {
+            android.util.Log.w("EventTV", "[알림] 앱 내 수신음 재생 실패");
+            return false;
         }
     }
 
     /** 일반 메시지만 호출한다. 이벤트는 기존 playInAppNotificationTone의 1회를 유지한다. */
     @JavascriptInterface
     public void playMessageNotificationTone(String messageId) {
+        if (messageId == null || messageId.trim().isEmpty() || messageId.length() > 256) return;
         final long generation = messageToneGeneration.get();
         messageToneHandler.post(() -> {
-            if (generation != messageToneGeneration.get() || !MainActivity.isInForeground
-                || !getNotificationSound()) return;
+            if (generation != messageToneGeneration.get() || !canPlayNotificationTone()) return;
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             String employeeId = prefs.getString(KEY_EMPLOYEE_ID, null);
-            if (!messageTonePolicy.claimMessageId(messageId)) return;
             if (!MessageNotificationTonePolicy.isFiveToneEmployee(employeeId)) {
-                // 웹이 이 메서드를 모든 직원에게 사용해도 다른 직원은 기존 1회 정책이다.
-                playInAppNotificationTone();
+                // Readiness/throttle precedes claiming; every other employee remains one tone.
+                playSingleNotificationTone(messageId);
                 return;
             }
-            if (!canPlayMessageNotificationTone()) return;
+            if (!canPlayMessageNotificationTone() || !messageTonePolicy.claimMessageId(messageId)) return;
 
             MediaPlayer player;
             try {
@@ -344,12 +347,24 @@ public class AndroidBridge {
 
     private boolean canPlayMessageNotificationTone() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        if (!MainActivity.isInForeground || !getNotificationSound() || getNotificationVolume() <= 0
-            || !MessageNotificationTonePolicy.isFiveToneEmployee(prefs.getString(KEY_EMPLOYEE_ID, null))
+        return MessageNotificationTonePolicy.isFiveToneEmployee(prefs.getString(KEY_EMPLOYEE_ID, null))
+            && canPlayNotificationTone();
+    }
+
+    private boolean canPlayNotificationTone() {
+        if (!MainActivity.isActuallyInForeground(context) || !getNotificationSound() || getNotificationVolume() <= 0
             || !MainActivity.canDeliverMessageNotification(context, null)) return false;
         AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         if (audio == null || audio.getRingerMode() != AudioManager.RINGER_MODE_NORMAL
             || audio.getStreamVolume(AudioManager.STREAM_NOTIFICATION) <= 0) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.NotificationManager manager = (android.app.NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+            android.app.NotificationChannel channel = manager == null ? null
+                : manager.getNotificationChannel(selectedMessageChannelId());
+            if (channel == null || channel.getSound() == null
+                || channel.getImportance() < android.app.NotificationManager.IMPORTANCE_DEFAULT) return false;
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             android.app.NotificationManager manager = (android.app.NotificationManager)
                 context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -381,6 +396,97 @@ public class AndroidBridge {
         stopMessageNotificationTones();
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(messageTonePreferenceListener);
+    }
+
+    private String selectedMessageChannelId() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return MessageNotificationTonePolicy.isFiveToneEmployee(prefs.getString(KEY_EMPLOYEE_ID, null))
+            ? MainActivity.getFiveToneMessageChannelId(getNotificationSound(), getVibrationDuration())
+            : MainActivity.getMessageChannelId(getNotificationSound(), getVibrationDuration());
+    }
+
+    /** Read-only health: no volume, notification-channel, DND or battery settings are changed. */
+    @JavascriptInterface
+    public String getNotificationHealth() {
+        JSONObject health = new JSONObject();
+        try {
+            AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            android.app.NotificationManager manager = (android.app.NotificationManager)
+                context.getSystemService(Context.NOTIFICATION_SERVICE);
+            int ringer = audio == null ? AudioManager.RINGER_MODE_SILENT : audio.getRingerMode();
+            boolean channelBlocked = false;
+            boolean channelSilent = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.app.NotificationChannel channel = manager == null ? null
+                    : manager.getNotificationChannel(selectedMessageChannelId());
+                channelBlocked = channel == null || channel.getImportance() == android.app.NotificationManager.IMPORTANCE_NONE;
+                channelSilent = channel == null || channel.getSound() == null
+                    || channel.getImportance() < android.app.NotificationManager.IMPORTANCE_DEFAULT;
+            } else channelSilent = !getNotificationSound();
+            boolean dnd = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && manager != null
+                && manager.getCurrentInterruptionFilter() != android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
+            android.app.ActivityManager activityManager = (android.app.ActivityManager)
+                context.getSystemService(Context.ACTIVITY_SERVICE);
+            android.os.PowerManager power = (android.os.PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            boolean batteryRestricted = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && activityManager != null
+                && activityManager.isBackgroundRestricted()) || (power != null && power.isPowerSaveMode());
+            health.put("permission", getNotificationPermissionStatus());
+            health.put("soundEnabled", getNotificationSound());
+            health.put("appVolume", getNotificationVolume());
+            health.put("systemVolume", audio == null ? 0 : audio.getStreamVolume(AudioManager.STREAM_NOTIFICATION));
+            health.put("systemMaxVolume", audio == null ? 0 : audio.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION));
+            health.put("ringerMode", ringer == AudioManager.RINGER_MODE_NORMAL ? "normal"
+                : ringer == AudioManager.RINGER_MODE_VIBRATE ? "vibrate" : "silent");
+            health.put("dnd", dnd);
+            health.put("channelBlocked", channelBlocked);
+            health.put("channelSilent", channelSilent);
+            health.put("batteryRestricted", batteryRestricted);
+            health.put("appVersion", context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName);
+        } catch (Exception ignored) {
+            android.util.Log.w("EventTV", "[알림] 진단 상태 조회 실패");
+        }
+        return health.toString();
+    }
+
+    private void openSettings(final Intent intent) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try { context.startActivity(intent); }
+            catch (RuntimeException ignored) {
+                try { context.startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + context.getPackageName()))); }
+                catch (RuntimeException unavailable) { android.util.Log.w("EventTV", "[알림] 설정 화면 열기 실패"); }
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void openMessageNotificationSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            openSettings(new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.getPackageName())
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, selectedMessageChannelId()));
+        } else openSettings(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:" + context.getPackageName())));
+    }
+
+    @JavascriptInterface
+    public void openNotificationSoundSettings() {
+        openSettings(new Intent(android.provider.Settings.ACTION_SOUND_SETTINGS));
+    }
+
+    @JavascriptInterface
+    public void openBatterySettings() {
+        openSettings(new Intent(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            ? android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            : android.provider.Settings.ACTION_SETTINGS));
+    }
+
+    /** User-initiated local audio only: no FCM, message creation or OS notification. */
+    @JavascriptInterface
+    public boolean playNotificationTestTone() {
+        if (!canPlayNotificationTone()) return false;
+        playMessageNotificationTone("local-test-" + android.os.SystemClock.elapsedRealtimeNanos());
+        return true;
     }
 
     /** Android 시스템 알림 권한 상태를 WebView에 전달한다. */
@@ -483,6 +589,10 @@ public class AndroidBridge {
     @JavascriptInterface
     public void setBadgeCount(int count) {
         MainActivity.currentUnreadCount = count;
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            messageToneHandler.post(() -> setBadgeCount(count));
+            return;
+        }
         android.util.Log.d("EventTV", "[배지] setBadgeCount: " + count);
         // 1) ShortcutBadger: 일부 런처에서 직접 배지 표시
         try {
@@ -497,6 +607,10 @@ public class AndroidBridge {
             android.app.NotificationManager nm = (android.app.NotificationManager)
                 context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
+            if (MainActivity.isActuallyInForeground(context)) {
+                nm.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+                return;
+            }
             if (count <= 0) {
                 // One UI는 남아 있는 개별 FCM 알림도 배지에 합산하므로 모두 정리한다.
                 nm.cancelAll();
@@ -580,10 +694,12 @@ public class AndroidBridge {
     public void onEmployeeLogin(String employeeId) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
             if (!java.util.Objects.equals(prefs.getString(KEY_EMPLOYEE_ID, null), employeeId)) {
                 stopMessageNotificationTones();
+                editor.remove(KEY_EMPLOYEE_TOKEN);
             }
-            prefs.edit().putString(KEY_EMPLOYEE_ID, employeeId).apply();
+            editor.putString(KEY_EMPLOYEE_ID, employeeId).apply();
             android.util.Log.d("EventTV", "[FCM] onEmployeeLogin - employeeId: " + employeeId);
         } catch (Exception e) {
             android.util.Log.e("EventTV", "onEmployeeLogin error: " + e.getMessage());

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline 1.4.45 regression: fixed 1.4.44 baseline, PCM and optional signed APK.
+"""Offline 1.4.46 regression: fixed 1.4.44 audio baseline, PCM and optional signed APK.
 
 Run from any directory: python3 app/src/test/python/verify_message_tone.py
 Add --apk FILE --previous-apk FILE to verify packaging, version and signing.
@@ -96,13 +96,10 @@ def verify_audio():
 
 
 def verify_source():
-    # The entire production Java surface must remain byte-identical to 1.4.44:
-    # DND/permissions, user volume, all v1 channels, IDs and cross-ID policy.
-    paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", BASELINE, JAVA],
-                                    cwd=REPO, text=True).splitlines()
-    assert paths
-    for path in paths:
-        assert (REPO / path).read_bytes() == baseline(path), "production Java changed: " + path
+    # 1.4.46 intentionally changes lifecycle/health/token handling, not the
+    # employee allowlist, sound resource, channel IDs or per-sample gain.
+    policy_path = JAVA + "MessageNotificationTonePolicy.java"
+    assert (REPO / policy_path).read_bytes() == baseline(policy_path), "employee policy changed"
     main = (REPO / (JAVA + "MainActivity.java")).read_text()
     bridge = (REPO / (JAVA + "AndroidBridge.java")).read_text()
     policy = (REPO / (JAVA + "MessageNotificationTonePolicy.java")).read_text()
@@ -121,7 +118,7 @@ def verify_source():
     assert method.count('preparedPlayer.start();') == 1 and 'player.setLooping(false);' in method
     assert 'postDelayed' not in method and '1.5' not in method
     assert '"_v1"' in policy
-    print("PASS all %d production Java files byte-identical to 1.4.44; one non-looping WAV, no double gain" % len(paths))
+    print("PASS employee policy byte-identical to 1.4.44; one non-looping WAV, no double gain")
     print("PASS foreground and all 4 audible v1 background channels resolve", URI)
     print("PASS no channel deletion/ID migration; user mute/custom settings, legacy ToneGenerator80 and protections retained")
 
@@ -135,7 +132,7 @@ def verify_apk(current, previous, sdk, source):
     print("PASS both APK signatures verified; signer SHA-256:", certs[1][0])
     badging = subprocess.check_output([str(sdk / "aapt2"), "dump", "badging", str(current)], text=True)
     assert "name='com.eventtv.messenger'" in badging.splitlines()[0]
-    assert "versionCode='59' versionName='1.4.45'" in badging.splitlines()[0]
+    assert "versionCode='60' versionName='1.4.46'" in badging.splitlines()[0]
     print("PASS", badging.splitlines()[0])
     # AGP optimizeReleaseResources shortens ZIP paths (e.g. res/EQ.wav),
     # while the public raw/message_five_tones name/URI remains unchanged.
@@ -145,7 +142,7 @@ def verify_apk(current, previous, sdk, source):
     resource_id, raw_entry = resource.groups()
     with zipfile.ZipFile(previous) as archive:
         old_paths = [name for name in archive.namelist() if name.endswith(".wav")]
-        assert len(old_paths) == 1 and sha(archive.read(old_paths[0])) == OLD_SHA
+        assert len(old_paths) == 1 and sha(archive.read(old_paths[0])) in (OLD_SHA, NEW_SHA)
     with zipfile.ZipFile(current) as archive:
         wav_paths = [name for name in archive.namelist() if name.endswith(".wav")]
         assert wav_paths == [raw_entry], wav_paths

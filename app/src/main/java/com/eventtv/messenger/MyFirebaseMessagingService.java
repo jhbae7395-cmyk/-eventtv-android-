@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 
 public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
+    private static final BackgroundMessageReceiptPolicy backgroundReceipts = new BackgroundMessageReceiptPolicy();
     private static final String REGISTER_URL =
         "https://eventtv-gpdc5ulb.manus.space/api/trpc/messenger.registerFcmToken?batch=1";
 
@@ -84,7 +85,10 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         // 앱이 실제 포그라운드이면 알림·배지·소리 모두 표시하지 않는다.
         // 서버 포그라운드 상태가 갱신되기 전 도착한 FCM도 이 앱 단의 검증으로 막는다.
-        if (MainActivity.isInForeground) return;
+        if (MainActivity.isActuallyInForeground(this)) {
+            MainActivity.dispatchForegroundMessage(this, remoteMessage.getData());
+            return;
+        }
 
         // 새 APK를 설치한 뒤 Activity가 아직 열리지 않았더라도 FCM 서비스가 v4 채널을 만든다.
         MainActivity.ensureNotificationChannels(this);
@@ -114,8 +118,6 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
             .setSilent(true)
             .setContentIntent(badgePendingIntent);
-        manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
-        manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
 
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         boolean soundEnabled = prefs.getBoolean(AndroidBridge.KEY_NOTIFICATION_SOUND, true);
@@ -157,14 +159,45 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent);
 
-        int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
-        manager.notify(popupNotificationId, builder.build());
+        // Before Android O there is no channel to supply sound/vibration defaults.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            if (soundEnabled) builder.setSound(fiveToneMessage ? MainActivity.getFiveToneSoundUri(this)
+                : android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION));
+            if (vibrationDurationMs > 0) builder.setVibrate(new long[]{0, vibrationDurationMs});
+        }
+        // Serialize final posting with Activity lifecycle callbacks on the main thread.
+        // A resume between reception and posting must still produce no OS notification.
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            if (MainActivity.isActuallyInForeground(this)) {
+                MainActivity.dispatchForegroundMessage(this, remoteMessage.getData());
+                return;
+            }
+            if (!MainActivity.canDeliverMessageNotification(this, selectedChannelId)) return;
+            String recipientId = remoteMessage.getData().get("employeeId");
+            SharedPreferences currentPrefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+            String currentEmployeeId = currentPrefs.getString(AndroidBridge.KEY_EMPLOYEE_ID, null);
+            // Reject a queued payload for an old account, including non-message events.
+            if (recipientId != null && !recipientId.equals(currentEmployeeId)) return;
+            if ("messenger_message".equals(remoteMessage.getData().get("type"))) {
+                String messageId = remoteMessage.getData().get("messageId");
+                String channelId = remoteMessage.getData().get("channelId");
+                if (!MainActivity.isPositiveNumericId(recipientId) || !MainActivity.isPositiveNumericId(messageId)
+                    || !MainActivity.isPositiveNumericId(channelId) || !recipientId.equals(currentEmployeeId)
+                    || currentPrefs.getString(AndroidBridge.KEY_EMPLOYEE_TOKEN, "").isEmpty()) return;
+                if (!backgroundReceipts.claim(recipientId, messageId, android.os.SystemClock.elapsedRealtime())) return;
+            }
+            manager.cancel(MainActivity.BADGE_NOTIFICATION_ID);
+            manager.notify(MainActivity.BADGE_NOTIFICATION_ID, badgeBuilder.build());
+            int popupNotificationId = (int) (System.currentTimeMillis() % Integer.MAX_VALUE);
+            manager.notify(popupNotificationId, builder.build());
+        });
     }
 
     @Override
     public void onNewToken(String newToken) {
         super.onNewToken(newToken);
         android.util.Log.d("EventTV", "[FCM] 토큰 갱신 수신");
+        MainActivity.dispatchFcmToken(newToken);
 
         SharedPreferences prefs = getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
         String employeeIdStr = prefs.getString(AndroidBridge.KEY_EMPLOYEE_ID, null);
@@ -199,10 +232,10 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                     output.flush();
                 }
                 int responseCode = connection.getResponseCode();
-                android.util.Log.d("EventTV", "[FCM] onNewToken 서버 업데이트 완료: HTTP " + responseCode);
+                android.util.Log.d("EventTV", "[FCM] onNewToken 서버 응답: HTTP " + responseCode);
                 connection.disconnect();
             } catch (Exception error) {
-                android.util.Log.e("EventTV", "[FCM] onNewToken 서버 업데이트 실패", error);
+                android.util.Log.e("EventTV", "[FCM] onNewToken 서버 업데이트 실패 (다음 앱 복귀 시 재시도)");
             }
         }).start();
     }

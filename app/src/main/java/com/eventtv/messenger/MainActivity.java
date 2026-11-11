@@ -3,6 +3,10 @@ package com.eventtv.messenger;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
+import android.app.KeyguardManager;
+import android.os.PowerManager;
+import android.graphics.Bitmap;
+import java.lang.ref.WeakReference;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
@@ -37,7 +41,9 @@ public class MainActivity extends AppCompatActivity {
 
     // 새 설치본은 이 버전 매개변수로 최신 메신저 HTML·JS를 다시 요청한다.
     private static final String MESSENGER_URL =
-        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.43";
+        "https://eventtv-gpdc5ulb.manus.space/messenger?androidVersion=1.4.46";
+    private static volatile WeakReference<MainActivity> currentActivity = new WeakReference<>(null);
+    private volatile boolean messengerPageReady = false;
     private WebView webView;
     private AndroidBridge androidBridge;
     private boolean isHandlingSystemBack = false;
@@ -106,6 +112,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        currentActivity = new WeakReference<>(this);
         setContentView(R.layout.activity_main);
 
         // 알림 채널 생성 (Android 8.0+)
@@ -127,7 +134,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setUserAgentString(
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.43"
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 EventTVApp/1.4.46"
         );
 
         // JavaScript → Android 브릿지
@@ -144,6 +151,12 @@ public class MainActivity extends AppCompatActivity {
         getOnBackPressedDispatcher().addCallback(this, systemBackCallback);
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                messengerPageReady = false;
+                super.onPageStarted(view, url, favicon);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
@@ -166,21 +179,9 @@ public class MainActivity extends AppCompatActivity {
                 // 페이지가 준비된 시점에 한 번 더 알리면 채팅방 선택 뒤에도 공유 내용이 유지된다.
                 if (!pendingSharedUris.isEmpty()) notifySharedFilesAvailable();
                 if (!pendingSharedText.isEmpty()) notifySharedTextAvailable();
-                // 페이지 로드 완료 후 FCM 토큰 재전달 (타이밍 문제 대비)
-                FirebaseMessaging.getInstance().getToken()
-                    .addOnCompleteListener(task -> {
-                        if (task.isSuccessful() && task.getResult() != null) {
-                            String fcmToken = task.getResult();
-                            view.post(() ->
-                                view.evaluateJavascript(
-                                    "window.fcmToken = '" + fcmToken + "'; " +
-                                    "window.__fcmToken = '" + fcmToken + "'; " +
-                                    "if (window.onFcmToken) window.onFcmToken('" + fcmToken + "');",
-                                    null
-                                )
-                            );
-                        }
-                    });
+                messengerPageReady = isMessengerPage(url);
+                syncFcmToken();
+                syncForegroundStateToWeb();
                 notifyNotificationPermissionStatus();
             }
         });
@@ -387,11 +388,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        currentActivity = new WeakReference<>(this);
         // 정적 변수로 포그라운드 상태 설정 (MyFirebaseMessagingService에서 참조)
         isInForeground = true;
         // 백그라운드에서 중지된 WebView 타이머가 있을 경우 즉시 재개한다.
         if (webView != null) webView.onResume();
         notifyNotificationPermissionStatus();
+        syncFcmToken();
         // 앱 포그라운드 진입 시 알림 트레이의 FCM 알림 모두 취소 → 아이콘 배지 제거
         // (알림 트레이에 setNumber가 있으면 ShortcutBadger보다 우선 표시되므로 반드시 취소)
         try {
@@ -462,8 +465,95 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        messengerPageReady = false;
+        if (currentActivity.get() == this) {
+            isInForeground = false;
+            currentActivity = new WeakReference<>(null);
+        }
         if (androidBridge != null) androidBridge.destroy();
         super.onDestroy();
+    }
+
+    /** Resumed alone is insufficient when a lock screen or display-off leaves stale state. */
+    static boolean isActuallyInForeground(Context context) {
+        MainActivity activity = currentActivity.get();
+        if (!isInForeground || activity == null || activity.isFinishing() || activity.isDestroyed()) return false;
+        PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        KeyguardManager keyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        return power != null && power.isInteractive()
+            && (keyguard == null || !keyguard.isKeyguardLocked());
+    }
+
+    private static boolean isMessengerPage(String url) {
+        if (url == null) return false;
+        Uri uri = Uri.parse(url);
+        return "https".equals(uri.getScheme()) && "eventtv-gpdc5ulb.manus.space".equals(uri.getHost())
+            && "/messenger".equals(uri.getPath());
+    }
+
+    private void syncForegroundStateToWeb() {
+        if (webView == null || !messengerPageReady) return;
+        boolean foreground = isActuallyInForeground(this);
+        webView.evaluateJavascript("window._androidIsInForeground = " + foreground + ";"
+            + "if (window._messengerSocket && window._messengerSocket.connected) window._messengerSocket.emit('"
+            + (foreground ? "app_foreground" : "app_background") + "');", null);
+    }
+
+    private void syncFcmToken() {
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+            if (task.isSuccessful() && task.getResult() != null) dispatchFcmToken(task.getResult());
+            else android.util.Log.w("EventTV", "[FCM] 현재 토큰 조회 실패 (다음 복귀 시 재시도)");
+        });
+    }
+
+    /** Token values are passed only to the trusted loaded page, never logged. */
+    static void dispatchFcmToken(String token) {
+        MainActivity activity = currentActivity.get();
+        if (activity == null || token == null || token.isEmpty()) return;
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed() || activity.webView == null
+                || !activity.messengerPageReady || !isMessengerPage(activity.webView.getUrl())) return;
+            String quoted = JSONObject.quote(token);
+            activity.webView.evaluateJavascript("window.fcmToken = " + quoted + ";window.__fcmToken = " + quoted
+                + ";if (typeof window.onFcmToken === 'function') window.onFcmToken(" + quoted + ");", null);
+        });
+    }
+
+    static boolean isPositiveNumericId(String value) {
+        if (value == null || !value.matches("[1-9][0-9]{0,15}")) return false;
+        try { return Long.parseLong(value) <= 9007199254740991L; }
+        catch (NumberFormatException ignored) { return false; }
+    }
+
+    /** Foreground FCM is a second realtime input, never an OS notification/direct sound. */
+    static void dispatchForegroundMessage(Context context, java.util.Map<String, String> data) {
+        if (!"messenger_message".equals(data.get("type"))) return;
+        String employeeId = data.get("employeeId");
+        String channelId = data.get("channelId");
+        String messageId = data.get("messageId");
+        SharedPreferences prefs = context.getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+        if (!isPositiveNumericId(employeeId) || !isPositiveNumericId(channelId) || !isPositiveNumericId(messageId)
+            || !employeeId.equals(prefs.getString(AndroidBridge.KEY_EMPLOYEE_ID, null))
+            || prefs.getString(AndroidBridge.KEY_EMPLOYEE_TOKEN, "").isEmpty()) return;
+        MainActivity activity = currentActivity.get();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            SharedPreferences current = activity.getSharedPreferences(AndroidBridge.PREFS_NAME, MODE_PRIVATE);
+            if (!isActuallyInForeground(activity) || !activity.messengerPageReady || activity.webView == null
+                || !isMessengerPage(activity.webView.getUrl())
+                || !employeeId.equals(current.getString(AndroidBridge.KEY_EMPLOYEE_ID, null))
+                || current.getString(AndroidBridge.KEY_EMPLOYEE_TOKEN, "").isEmpty()) return;
+            try {
+                JSONObject detail = new JSONObject();
+                detail.put("type", "messenger_message"); detail.put("employeeId", employeeId);
+                detail.put("channelId", channelId); detail.put("messageId", messageId);
+                detail.put("title", data.get("title")); detail.put("body", data.get("body"));
+                activity.webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('eventtvNativeMessage',{detail:"
+                    + detail.toString() + "}));", null);
+            } catch (org.json.JSONException ignored) {
+                android.util.Log.w("EventTV", "[FCM] 전경 메시지 이벤트 구성 실패");
+            }
+        });
     }
 
     private void dispatchMessengerBack() {
